@@ -1,57 +1,208 @@
-# https://plantuml.com/class-diagram
-
 @startuml
-interface Open3D{
-}
-hide Open3D members
+hide empty members
 
-abstract Object{
-    -vec3<float> pos,
-    -vec3<float> norm
-    +setPos(vec3<float> pos)
-    +getPos(vec3<float> pos)
-    +setNorm(vec3<float> norm)
-    +getNorm(vec3<float> norm)
+' - - - - - - - - - - Orchestrator - - - - - - - - - - '
+class SimulationRunner{
+    - scene: Scene
+    - emitter: Emitter
+    - detector: Detector
+    - ray_tracer: RayTracer
+    - hist_proc: HistogramProcessor
+    - safety: LaserSafety
+    + trace_propagation(): void
+    + generate_illumination(): void
+    + accumulate_events(): void
+    + evaluate(): void
+    + analyse_depth(): void
 }
+SimulationRunner --> Open3D
+SimulationRunner *-- Scene
+SimulationRunner *-- Emitter
+SimulationRunner *-- Detector
+SimulationRunner *-- RayTracer
+SimulationRunner *-- HistogramProcessor
+SimulationRunner *-- LaserSafety
 
-class Surface extends Object{
-}
-class Emitter extends Object{
-}
-class Detector extends Object{
-}
+' - - - - - - - - - - Dependencies - - - - - - - - - '
+interface RaySect{}
+interface Open3D{}
 
-class SceneEdit{
-    -tuple<Object, int> obj_list
-    +int add(Object obj)
-    +bool del(Object obj)
-    +void setView(int obj_id)
-    +void setView(float x, y, z, rx, ry, rz)
-    +void moveView(float dx, dy, dz, drx, dry, drz)
-}
-
-class RayTracer{
-    +PSD simulate()
-}
-
+' - - - - - - - - - - Laser Safety - - - - - - - - -
 class LaserSafety{
-    +int safetyClass()
+    + assessClass(em: Emitter): String
+}
+LaserSafety --> Emitter
+
+' - - - - - - - - - - Histogram Processor - - - - - - - - -
+class HistogramProcessor{
+    + get_depth_wav_decomp(hist: Histogram): float
+    + get_depth_echo_detection(hist: Histogrram): float
+    + get_depth_deconvolution(hist: Histogram): float
+    + get_depth_ai_model(hist: Histogram): float
+}
+HistogramProcessor --> Histogram
+
+' - - - - - - - - - - Ray Tracer - - - - - - - - - '
+class RayTracer{
+    + ray_bundle: tuple<radiance, length, row, col>
+    + run(): void
+}
+RayTracer --> RaySect
+
+' - - - - - - - - - - Detector - - - - - - - - - - '
+class Histogram{
+    + bin: float[]
+    + time_start: float
+    + time_end: float
 }
 
-class SPAD{
+class Detector{
+    + hist: Histogram
+    + transform: Transform
+    + zone_rows: int
+    + zone_cols: int
+    + fov_x_rad: float
+    + fov_y_rad: float
+    + bin_count: int
+    + bin_width_ps: float
+    + spad_noise: SPADNoise
+}
+class SPADNoise{
+    + efficiency: float
+    + jitter_ps: float
+    + dead_time_ns: float
+    + dark_count_rate: float
+    + crosstalk_prob: float
+}
+Detector *-- SPADNoise
+Detector *-- Transform
+Detector *-- Histogram
+
+' - - - - - - - - - - Emitter - - - - - - - - - - '
+class Emitter{
+    + transform: Transform
+    + wavelength_nm: float
+    + pulse_energy_mJ: float
+    + pulse_width_ns: float
+    + emission_angle_rad: float
+    + beam_geometric_profile(r): float
+    + beam_temporal_profile(t): float
+}
+Emitter *-- Transform
+
+' - - - - - - - - - - Scene - - - - - - - - - - '
+class Scene{
+    - objects: SceneObject[]
+    - environment: Environment
 }
 
-class HistogramProcessing{
-    +float getD
-    epth()
+class Environment{
+    + ambient_light: float
 }
 
-SceneEdit --> Object
-SceneEdit --> Open3D
-SceneEdit --> RayTracer
-LaserSafety --> RayTracer
-SPAD --> RayTracer
-HistogramProcessing --> SPAD
+class SceneObject{
+    + name: String
+    + geometry: Geometry
+    + material: Material
+    + transform: Transform
+}
 
+class Transform{
+    + T: mat4
+}
+
+class Material{
+    + roughness: float
+    + albedo: vec3
+}
+
+class Geometry{
+    + mesh_ref: string
+}
+
+Scene *-- Environment
+Scene *-- SceneObject
+SceneObject *-- Geometry
+SceneObject *-- Material
+SceneObject *-- Transform
 
 @enduml
+
+''https://plantuml.com/class-diagram
+'
+''- - - External Libraries - - -
+'interface Open3D{
+'}
+'hide Open3D members
+'interface Raysect{
+'}
+'hide Raysect members
+'
+''- - -  Object - - -
+'abstract Object{
+'    +pos: vec3<float>
+'    +norm: vec3<float>
+'}
+'class Surface extends Object{
+'    +
+'}
+'class Emitter extends Object{
+'}
+'class Detector extends Object{
+'}
+'
+''- - -  Pipeline - - -
+'class SceneEdit{
+'    +surfaces: tuple<Surface, int>
+'    +emitters: tuple<Emitter, int>
+'    +detectors: tuple<Detector, int>
+'    +add(obj: Object): int
+'    +del(obj_id: int): bool
+'    +focusView(obj_id: int): void
+'}
+'
+'class RayTracer{
+'    +simulate(): <PSD, t, x, y>
+'}
+'
+'class LaserSafety{
+'    +safetyClass(): int
+'}
+'
+'class SPADModel{
+'    +getHistogram(): <signal, bin, x, y, t>
+'}
+'
+'class HistogramProcessing{
+'    +getDepth(): <depth, x, y, t>
+'}
+'
+'class Plotter{
+'    +plotPSD(PSD, t, x, y): void
+'    +plotHistogram(signal, bin, t, x, y): void
+'    +plotDepth(depth, x, y, t): void
+'}
+'
+''- - - Relationships - - -
+''Interfaces
+'SceneEdit -u-> Open3D
+'RayTracer -u-> Raysect
+'
+''Pipeline
+'Object <-u- SceneEdit
+'SceneEdit <-r- RayTracer
+'RayTracer <-r- SPADModel
+'RayTracer <-- LaserSafety
+'SPADModel <-r- HistogramProcessing
+'
+'Plotter <-u- RayTracer
+'Plotter <-u- SPADModel
+'Plotter <-u- HistogramProcessing
+'
+'
+''SceneEdit --> Open3D
+''SceneEdit -- RayTracer
+''RayTracer --> Raysect
+''LaserSafety --> RayTracer
+''SPAD --> RayTracer
+''HistogramProcessing --> SPAD
