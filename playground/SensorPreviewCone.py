@@ -8,7 +8,7 @@ class Cone:
         self.alpha = alpha
 
     def preview(self, distance):
-
+        pass
 
 camera = Cone(0, 0, 0, np.deg2rad(80))
 lidar = Cone(30, 20, -25, np.deg2rad(45))
