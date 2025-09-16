@@ -3,10 +3,28 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.pyplot import tight_layout
 from lidar.Histogram import Histogram
+from multiprocessing import Process
 
 class Plotter:
     def __init__(self):
         pass
+
+    @staticmethod
+    def new_process(target, *args, daemon=False, **kwargs):
+        if isinstance(target, str):
+            func = getattr(Plotter, target, None)
+            if func is None or not callable(func):
+                raise ValueError(f"Plotter has no callable '{target}'")
+        elif callable(target):
+            func = target
+        else:
+            raise TypeError("target must be a function name (str) or a callable")
+
+        # Launch the plotting function in a new process
+        p = Process(target=func, args=args, kwargs=kwargs)
+        p.daemon = daemon  # usually keep False for GUI stability
+        p.start()
+        return p
 
     @staticmethod
     def plot_hist(hist):

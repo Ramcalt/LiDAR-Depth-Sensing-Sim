@@ -7,7 +7,6 @@ from lidar.Detector import Detector
 from Plotter import Plotter
 import open3d as o3d
 
-
 class Simulation:
     """Singleton for managing simulation."""
     scene: Scene
@@ -50,17 +49,20 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        self.view_scene()
         self.detector.fill_hist_with_noise()
-        Plotter.plot_hist(self.detector.histograms[0][0])
-        Plotter.plot_hist_arr(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
-        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
-
+        self.view_plots()
+        self.view_scene()
 
     def view_scene(self):
         """View the scene using Open3D"""
         meshes = [obj.to_o3d_mesh() for obj in self.scene.objects]
         o3d.visualization.draw(meshes, raw_mode=True)
+
+    def view_plots(self):
+        """Runs matplotlib plots in separate processes"""
+        Plotter.new_process(Plotter.plot_hist, self.detector.histograms[0][0])
+        Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        Plotter.new_process(Plotter.plot_points, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
 
 
 sim = Simulation()
