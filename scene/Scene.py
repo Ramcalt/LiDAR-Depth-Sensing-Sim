@@ -1,4 +1,4 @@
-import SceneObject
+from scene.SceneObject import SceneObject
 import numpy as np
 from typing import List
 
@@ -11,12 +11,12 @@ class Scene:
     def __init__(self, ambient_intensity, ambient_colour):
         self.ambient_intensity = ambient_intensity
         self.ambient_colour = ambient_colour
-        objects = []
+        self.objects = []
 
-    def addObj(self, obj: SceneObject):
+    def add_obj(self, obj: SceneObject):
         self.objects.append(obj)
 
-    def getObj(self, name: str):
+    def get_obj(self, name: str):
         for obj in self.objects:
             if obj.name == name:
                 return obj
