@@ -15,7 +15,8 @@ class SceneObject:
         self.material = material
         self.transform = transform
 
-    def to_o3d_geometry(self):
+    def to_o3d_mesh(self):
+        """Convert mesh into a renderable Open3D object with applied colour and transform"""
         mesh = o3d.io.read_triangle_mesh(self.mesh_path)
         if mesh.is_empty() or len(mesh.triangles) == 0:
             raise ValueError("Mesh is empty or does not contain any triangles")

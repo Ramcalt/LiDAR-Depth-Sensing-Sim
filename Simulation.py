@@ -4,6 +4,7 @@ from scene.Material import Material
 from scene.HTransform import HTransform
 from lidar.Emitter import Emitter
 from lidar.Detector import Detector
+from Plotter import Plotter
 import open3d as o3d
 
 
@@ -14,9 +15,9 @@ class Simulation:
     detector: Detector
 
     def __init__(self):
-        # create scene and add objects
+        """Initialise scene and add emitter, detector, and scene objects"""
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
-        self.Emitter = Emitter("emitter",
+        self.emitter = Emitter("emitter",
                                "res/sensor.stl",
                                Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
                                HTransform().translation(-0.25, 0, 1),
@@ -26,7 +27,7 @@ class Simulation:
                                0.79,
                                0.79
                                )
-        self.Detector = Detector("detector",
+        self.detector = Detector("detector",
                                  "res/sensor.stl",
                                  Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
                                  HTransform().translation(0.25, 0, 1),
@@ -34,7 +35,7 @@ class Simulation:
                                  8,
                                  0.79,
                                  0.79,
-                                 100,
+                                 40,
                                  125e-12
                                  )
         self.scene.add_obj(
@@ -44,14 +45,21 @@ class Simulation:
                         HTransform()
                         )
         )
-        self.scene.add_obj(self.Detector)
-        self.scene.add_obj(self.Emitter)
+        self.scene.add_obj(self.detector)
+        self.scene.add_obj(self.emitter)
 
     def run(self):
+        """Run the simulation"""
         self.view_scene()
+        self.detector.fill_hist_with_noise()
+        Plotter.plot_hist(self.detector.histograms[0][0])
+        Plotter.plot_hist_arr(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+
 
     def view_scene(self):
-        meshes = [obj.to_o3d_geometry() for obj in self.scene.objects]
+        """View the scene using Open3D"""
+        meshes = [obj.to_o3d_mesh() for obj in self.scene.objects]
         o3d.visualization.draw(meshes, raw_mode=True)
 
 

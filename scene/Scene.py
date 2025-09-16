@@ -14,6 +14,8 @@ class Scene:
         self.objects = []
 
     def add_obj(self, obj: SceneObject):
+        if self.get_obj(obj.name) is not None:
+            raise Exception("Object with same name already exists")
         self.objects.append(obj)
 
     def get_obj(self, name: str):
