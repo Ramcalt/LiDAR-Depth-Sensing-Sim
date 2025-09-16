@@ -11,7 +11,7 @@ class HTransform:
         else:
             if matrix.shape != (4, 4):
                 raise ValueError("Transform matrix must be 4x4.")
-            self.matrix = matrix.asType(float)
+            self.matrix = matrix.astype(float)
 
     def __matmul__(self, other):
         """Overload for HTransform."""

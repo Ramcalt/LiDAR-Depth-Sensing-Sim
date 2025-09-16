@@ -17,6 +17,8 @@ class SceneObject:
 
     def to_o3d_geometry(self):
         mesh = o3d.io.read_triangle_mesh(self.mesh_path)
+        if mesh.is_empty() or len(mesh.triangles) == 0:
+            raise ValueError("Mesh is empty or does not contain any triangles")
         mesh.transform(self.transform.matrix)
         mesh.compute_vertex_normals()
         mesh.paint_uniform_color(self.material.colour)

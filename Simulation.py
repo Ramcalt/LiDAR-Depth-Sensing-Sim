@@ -11,22 +11,19 @@ class Simulation:
 
     def __init__(self):
         self.scene = Scene(0.1, [0.3, 0.3, 0.6])
-        self.scene.add_obj(SceneObject("cavity", "res/cavity.obj",
+        self.scene.add_obj(SceneObject("cavity", "res/cavity.stl",
                                        Material(0.2, 0.8, 1, [0.9, 0.2, 0.1]),
                                        HTransform()))
+        self.scene.add_obj(SceneObject("cavity", "res/cavity.stl",
+                                       Material(0.2, 0.8, 1, [0.9, 0.2, 0.1]),
+                                       HTransform().rotation_x(0.01) @ HTransform.scaling(1, 0.25, 0.5) @ HTransform.translation(1, 1, 1)))
 
     def run(self):
         self.viewScene()
 
     def viewScene(self):
-        meshes = []
-        for obj in self.scene.objects:
-            meshes.append(obj.to_o3d_geometry())
-        o3d.visualization.draw_geometries(meshes)
+        meshes = [obj.to_o3d_geometry() for obj in self.scene.objects]
+        o3d.visualization.draw(meshes, raw_mode=True)
 
-print(o3d.__version__)
-mesh = o3d.geometry.TriangleMesh.create_sphere()
-mesh.compute_vertex_normals()
-o3d.visualization.draw(mesh, raw_mode=True)
 sim = Simulation()
 sim.run()
