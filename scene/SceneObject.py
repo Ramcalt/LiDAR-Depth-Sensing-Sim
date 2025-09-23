@@ -1,6 +1,9 @@
 from scene.Material import Material
 from scene.HTransform import HTransform
 import open3d as o3d
+from raysect.primitive import import_stl
+from raysect.optical import World
+from raysect.core.math.affinematrix import AffineMatrix3D
 
 class SceneObject:
     """Renderable component with material, geometry, and transform"""
@@ -25,5 +28,13 @@ class SceneObject:
         mesh.paint_uniform_color(self.material.colour)
         return mesh
 
-
+    def to_raysect_mesh(self):
+        mesh = import_stl(
+            self.mesh_path,
+            scaling=1,
+            mode='binary',
+            parent=World(),
+            transform = AffineMatrix3D(self.transform.matrix)
+        )
+        return mesh
 
