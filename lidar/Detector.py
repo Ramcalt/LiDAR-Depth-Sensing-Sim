@@ -1,3 +1,6 @@
+from raysect.core import AffineMatrix3D
+from raysect.optical.observer import PinholeCamera
+
 from scene.SceneObject import SceneObject
 from lidar.Histogram import Histogram
 from typing import List
@@ -39,3 +42,15 @@ class Detector(SceneObject):
                        ) for _ in range(self.zone_cols)
              ] for _ in range(self.zone_rows)
         ], dtype=object)
+
+    def to_raysect_detector(self, world, pipelines):
+        detector = PinholeCamera((512, 512), pipelines=[pipelines], transform=AffineMatrix3D(self.transform.matrix))
+        detector.fov = np.rad2deg(self.fov_x_rad)
+        detector.spectral_rays = 1
+        detector.spectral_bins = 20
+        detector.ray_max_depth = 100
+        detector.ray_extinction_prob = 0.1
+        detector.min_wavelength = 375.0
+        detector.max_wavelength = 740.0
+        detector.parent = world
+        return detector

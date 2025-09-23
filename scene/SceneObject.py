@@ -28,13 +28,14 @@ class SceneObject:
         mesh.paint_uniform_color(self.material.colour)
         return mesh
 
-    def to_raysect_mesh(self):
+    def to_raysect_mesh(self, world):
         mesh = import_stl(
             self.mesh_path,
             scaling=1,
             mode='binary',
-            parent=World(),
-            transform = AffineMatrix3D(self.transform.matrix)
+            parent=world,
+            transform = AffineMatrix3D(self.transform.matrix),
+            material = self.material.to_raysect_material()
         )
         return mesh
 

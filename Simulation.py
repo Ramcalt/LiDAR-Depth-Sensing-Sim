@@ -1,3 +1,4 @@
+from lidar.RayTracer import RayTracer
 from scene.Scene import Scene
 from scene.SceneObject import SceneObject
 from scene.Material import Material
@@ -20,7 +21,8 @@ class Simulation:
                                "res/sensor.stl",
                                Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
                                HTransform().translation(-0.25, 0, 1),
-                               940e-9,
+                               # 940e-9,
+                               700-9,
                                (2 * 0.74e-3 * 0.90e-3),
                                1e-9,
                                0.79,
@@ -32,16 +34,23 @@ class Simulation:
                                  HTransform().translation(0.25, 0, 1),
                                  8,
                                  8,
-                                 0.79,
+                                 0.79*2,
                                  0.79,
                                  40,
                                  125e-12
                                  )
         self.scene.add_obj(
-            SceneObject("cavity",
+            SceneObject("cavity1",
                         "res/cavity.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform()
+                        )
+        )
+        self.scene.add_obj(
+            SceneObject("cavity2",
+                        "res/cavity.stl",
+                        Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
+                        HTransform().translation(0,0,+2)
                         )
         )
         self.scene.add_obj(self.detector)
@@ -49,8 +58,9 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        self.detector.fill_hist_with_noise()
-        self.view_plots()
+        RayTracer.run(self.scene, self.emitter, self.detector)
+        # self.detector.fill_hist_with_noise()
+        # self.view_plots()
         self.view_scene()
 
     def view_scene(self):
