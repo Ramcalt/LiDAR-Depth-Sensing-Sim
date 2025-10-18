@@ -8,8 +8,8 @@ import numpy as np
 def gaussian_line_sf(center_nm: float,
                      total_power: float,
                      fwhm_nm: float = 5.0,
-                     wl_min: int = 380,
-                     wl_max: int = 780,
+                     wl_min: int = 100,
+                     wl_max: int = 1100,
                      step_nm: int = 1) -> InterpolatedSF:
     """
     Build a narrowband spectral function with Gaussian shape centered at `center_nm`.
@@ -51,7 +51,7 @@ class Emitter(SceneObject):
         spectral_radiance_sf = gaussian_line_sf(
             center_nm=self.wavelength,
             total_power=power,
-            fwhm_nm=0.5
+            fwhm_nm=100
         )
 
         emitter_material = UniformSurfaceEmitter(spectral_radiance_sf)

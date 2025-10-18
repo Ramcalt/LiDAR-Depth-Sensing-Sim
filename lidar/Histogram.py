@@ -14,9 +14,10 @@ class Histogram:
             data = np.array([0.0 for _ in range(bin_count)])
         self.data = data
         self.time_start = time_start
-        self.time_end = time_end
         self.bin_count = bin_count
         self.bin_width = bin_width
+        self.time_end = float(time_end) if time_end else (self.time_start + self.bin_count * self.bin_width)
+
 
     @staticmethod
     def get_points_echo_detection():

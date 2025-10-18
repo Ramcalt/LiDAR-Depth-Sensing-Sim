@@ -21,9 +21,9 @@ class Simulation:
                                "res/sensor.stl",
                                Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
                                HTransform().translation(-0.25, 0, 1),
-                               # 940e-9,
-                               700-9,
-                               (2 * 0.74e-3 * 0.90e-3),
+                               940e-9,
+                               # 700-9,
+                               (200 * 0.74e-3 * 0.90e-3),
                                1e-9,
                                0.79,
                                0.79
@@ -34,10 +34,11 @@ class Simulation:
                                  HTransform().translation(0.25, 0, 1),
                                  8,
                                  8,
-                                 0.79*2,
+                                 0.79,
                                  0.79,
                                  40,
-                                 125e-12
+                                 #125e-12
+                                 2e-9
                                  )
         self.scene.add_obj(
             SceneObject("cavity1",
@@ -58,9 +59,10 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        RayTracer.run(self.scene, self.emitter, self.detector)
+        # RayTracer.run(self.scene, self.emitter, self.detector)
+        RayTracer.run_tof(self.scene, self.emitter, self.detector)
         # self.detector.fill_hist_with_noise()
-        # self.view_plots()
+        self.view_plots()
         self.view_scene()
 
     def view_scene(self):
