@@ -4,6 +4,7 @@ import open3d as o3d
 from raysect.primitive import import_stl
 from raysect.optical import World
 from raysect.core.math.affinematrix import AffineMatrix3D
+import trimesh
 
 class SceneObject:
     """Renderable component with material, geometry, and transform"""
@@ -17,6 +18,13 @@ class SceneObject:
         self.mesh_path = mesh_path
         self.material = material
         self.transform = transform
+
+    def to_trimesh_mesh(self):
+        mesh = trimesh.load(self.mesh_path)
+        mesh.apply_transform(self.transform.matrix)
+        mesh.visual.face_colors = self.material.colour
+        mesh.visual.material = self.material.to_trimesh_material()
+        return mesh
 
     def to_o3d_mesh(self):
         """Convert mesh into a renderable Open3D object with applied colour and transform"""

@@ -20,7 +20,7 @@ class HTransform:
         elif isinstance(other, np.ndarray):
             if other.shape != (4,):
                 raise ValueError("Vector size must be 4.")
-            return HTransform(self.matrix @ other)
+            return self.matrix @ other
         else:
             raise TypeError("Unsupported operand type for @")
 

@@ -7,6 +7,7 @@ from lidar.Emitter import Emitter
 from lidar.Detector import Detector
 from Plotter import Plotter
 import open3d as o3d
+import trimesh
 
 class Simulation:
     """Singleton for managing simulation."""
@@ -22,11 +23,11 @@ class Simulation:
                                Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
                                HTransform().translation(-0.25, 0, 1),
                                940e-9,
-                               # 700-9,
-                               (200 * 0.74e-3 * 0.90e-3),
+                               7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
                                1e-9,
                                0.79,
-                               0.79
+                               0.79,
+                               4
                                )
         self.detector = Detector("detector",
                                  "res/sensor.stl",
@@ -37,8 +38,7 @@ class Simulation:
                                  0.79,
                                  0.79,
                                  40,
-                                 #125e-12
-                                 2e-9
+                                 37.5e-3
                                  )
         self.scene.add_obj(
             SceneObject("cavity1",
@@ -57,18 +57,28 @@ class Simulation:
         self.scene.add_obj(self.detector)
         self.scene.add_obj(self.emitter)
 
+    def test_plotting(self):
+        self.detector.fill_hist_with_noise()
+        self.view_plots()
+
     def run(self):
         """Run the simulation"""
-        # RayTracer.run(self.scene, self.emitter, self.detector)
-        RayTracer.run_tof(self.scene, self.emitter, self.detector)
-        # self.detector.fill_hist_with_noise()
+        self.detector.fill_hist_with_noise()
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity2"), self.emitter, self.detector, 10_000)
         self.view_plots()
-        self.view_scene()
+        self.view_scene_trimesh()
 
     def view_scene(self):
         """View the scene using Open3D"""
         meshes = [obj.to_o3d_mesh() for obj in self.scene.objects]
         o3d.visualization.draw(meshes, raw_mode=True)
+
+    def view_scene_trimesh(self):
+        """View the scene using Open3D"""
+        meshes = [obj.to_trimesh_mesh() for obj in self.scene.objects]
+        scene = trimesh.Scene()
+        [scene.add_geometry(mesh) for mesh in meshes]
+        scene.show()
 
     def view_plots(self):
         """Runs matplotlib plots in separate processes"""

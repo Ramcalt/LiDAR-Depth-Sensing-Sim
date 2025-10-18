@@ -1,6 +1,6 @@
 import numpy as np
 from raysect.optical import Lambert, srgb_to_ciexyz, InterpolatedSF
-
+import trimesh
 
 def _srgb_to_linear(c: float) -> float:
     """Convert one sRGB component in [0,1] to linear RGB."""
@@ -62,6 +62,13 @@ class Material:
         for c in (r, g, b):
             if not (0.0 <= c <= 1.0):
                 raise ValueError("Colour components must be in [0, 1].")
+
+    def to_trimesh_material(self):
+        return trimesh.visual.material.PBRMaterial(
+            basicColorFactor=self.colour,
+            specular=self.specular,
+            roughness=self.roughness
+        )
 
     def to_raysect_material(self):
         r, g, b = float(self.colour[0]), float(self.colour[1]), float(self.colour[2])

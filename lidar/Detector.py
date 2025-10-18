@@ -37,6 +37,15 @@ class Detector(SceneObject):
             dtype=object
         )
 
+    def apply_binning(self, distances):
+        """ Apply SPAD finite time-resolution binning. """
+        distances = np.array(distances)
+        binned_distances = np.floor(distances / self.bin_width) * self.bin_width
+        bin_edges = np.linspace(0, self.bin_count * self.bin_width, self.bin_count + 1)
+        hist, _ = np.histogram(binned_distances, bins=bin_edges)
+        hist_normalised = hist / np.max(hist) if np.sum(hist) > 0 else hist
+        self.histograms[0, 0].data = hist_normalised
+
     def get_tof_edges_s(self) -> np.ndarray:
         """Uniform bin edges in seconds for the detector histograms (assumes all zones share layout)."""
         h = self.histograms[0, 0]
