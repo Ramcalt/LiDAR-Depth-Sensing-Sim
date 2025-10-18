@@ -8,6 +8,7 @@ from lidar.Detector import Detector
 from Plotter import Plotter
 import open3d as o3d
 import trimesh
+import numpy as np
 
 class Simulation:
     """Singleton for managing simulation."""
@@ -19,39 +20,32 @@ class Simulation:
         """Initialise scene and add emitter, detector, and scene objects"""
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
         self.emitter = Emitter("emitter",
-                               "res/sensor.stl",
+                               "res/sensor_toscale.stl",
                                Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
-                               HTransform().translation(-0.25, 0, 1),
+                               HTransform().translation(-0.002, 0, 0),
                                940e-9,
                                7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
                                1e-9,
-                               0.79,
-                               0.79,
+                               1.010546, # 57.9deg for 10% signal from max
+                               1.010546,
                                4
                                )
         self.detector = Detector("detector",
-                                 "res/sensor.stl",
+                                 "res/sensor_toscale.stl",
                                  Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
-                                 HTransform().translation(0.25, 0, 1),
+                                 HTransform().translation(0.002, 0, 0),
                                  8,
                                  8,
                                  0.79,
                                  0.79,
-                                 40,
-                                 37.5e-3
+                                 100,
+                                 1.25e-10
                                  )
         self.scene.add_obj(
-            SceneObject("cavity1",
-                        "res/cavity.stl",
+            SceneObject("cavity",
+                        "res/flat_W105.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
-                        HTransform()
-                        )
-        )
-        self.scene.add_obj(
-            SceneObject("cavity2",
-                        "res/cavity.stl",
-                        Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
-                        HTransform().translation(0,0,+2)
+                        HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
         )
         self.scene.add_obj(self.detector)
@@ -63,10 +57,9 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        self.detector.fill_hist_with_noise()
-        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity2"), self.emitter, self.detector, 10_000)
+        # self.detector.fill_hist_with_noise()
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 100_000)
         self.view_plots()
-        self.view_scene_trimesh()
 
     def view_scene(self):
         """View the scene using Open3D"""
@@ -88,4 +81,5 @@ class Simulation:
 
 
 sim = Simulation()
+sim.view_scene_trimesh()
 sim.run()

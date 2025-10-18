@@ -37,14 +37,35 @@ class Detector(SceneObject):
             dtype=object
         )
 
-    def apply_binning(self, distances):
+    def apply_binning(self, distances, row_idx, col_idx):
         """ Apply SPAD finite time-resolution binning. """
-        distances = np.array(distances)
-        binned_distances = np.floor(distances / self.bin_width) * self.bin_width
-        bin_edges = np.linspace(0, self.bin_count * self.bin_width, self.bin_count + 1)
-        hist, _ = np.histogram(binned_distances, bins=bin_edges)
-        hist_normalised = hist / np.max(hist) if np.sum(hist) > 0 else hist
-        self.histograms[0, 0].data = hist_normalised
+        distances = np.array(distances) / 3e8
+        binned_distances = np.floor(distances / self.bin_width).astype(int)
+
+        # Valid hits: in-range time bin and pixel indices
+        valid = (
+                (binned_distances >= 0) & (binned_distances < self.bin_count) &
+                (row_idx >= 0) & (row_idx < self.zone_rows) &
+                (col_idx >= 0) & (col_idx < self.zone_cols)
+        )
+        if not np.any(valid):
+            return
+
+        rows = row_idx[valid]
+        cols = col_idx[valid]
+        counts = binned_distances[valid]
+
+        # accumulate counts
+        H = np.zeros((self.zone_rows, self.zone_cols, self.bin_count), dtype=float)
+        np.add.at(H, (rows, cols, counts), 1.0)
+
+        # normalise
+        max_per = H.max(axis=2, keepdims=True)
+        np.divide(H, max_per, out=H, where=max_per > 0)
+
+        for row, col in np.unique(np.stack([rows, cols], axis=1), axis=0):
+            self.histograms[row, col].data = H[row, col]
+
 
     def get_tof_edges_s(self) -> np.ndarray:
         """Uniform bin edges in seconds for the detector histograms (assumes all zones share layout)."""
