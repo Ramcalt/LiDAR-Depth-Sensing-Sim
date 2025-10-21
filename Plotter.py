@@ -6,6 +6,13 @@ from matplotlib.pyplot import tight_layout
 from matplotlib.widgets import Slider
 from lidar.Histogram import Histogram
 from multiprocessing import Process
+import os
+import re
+import glob
+import math
+import pandas as pd
+from IPython.display import display, clear_output
+from ipywidgets import interact, IntSlider, VBox, HBox, HTML
 
 class Plotter:
     def __init__(self):
@@ -30,7 +37,7 @@ class Plotter:
 
     @staticmethod
     def plot_hist(hist):
-        edges = np.linspace(0, hist.bin_count * hist.bin_width, hist.bin_count + 1)
+        edges = np.linspace(0, hist.bin_count * hist.bin_width_m, hist.bin_count + 1)
         centers = 0.5 * (edges[:-1] + edges[1:])
         widths = np.diff(edges)
 
@@ -59,7 +66,7 @@ class Plotter:
                 hist = hists[r][c] if isinstance(hists, list) else hists[r, c]
 
                 # Build edges/centers/widths from bin_count and bin_width
-                edges = np.linspace(0, hist.bin_count * hist.bin_width, hist.bin_count + 1)
+                edges = np.linspace(0, hist.bin_count * hist.bin_width_m, hist.bin_count + 1)
                 centers = 0.5 * (edges[:-1] + edges[1:])
                 widths = np.diff(edges)
 
@@ -84,14 +91,28 @@ class Plotter:
         z = np.zeros_like(x)
         dx = np.ones_like(x)
         dy = np.ones_like(x)
-        dz = np.array([hists[yy][xx].get_points_echo_detection()
-                       for yy in range(rows) for xx in range(cols)], dtype=float)
+        dz = np.zeros(rows * cols, dtype=float)
+        # Fill dz with the first echo point value if it exists
+        max = -1000000000.0
+        min = 1000000000.0
+        for yy in range(rows):
+            for xx in range(cols):
+                points = hists[yy][xx].get_points_echo_detection()
+                if points:
+                    dz[yy * cols + xx] = points[0]  # flattening 2D indices
+                    if points[0] > max:
+                        max = points[0]
+                    if points[0] < min:
+                        min = points[0]
+        # dz = np.array([hists[yy][xx].get_points_echo_detection()[0]
+        #                for yy in range(rows) for xx in range(cols)], dtype=float)
         # 3D bar plot
         ax.bar3d(x, y, z, dx, dy, dz, shade=True)
 
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('value')
+        print(f"depth = {max - min}")
         plt.show()
 
     @staticmethod

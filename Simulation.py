@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from scipy.special import rel_entr
 import matplotlib.pyplot as plt
+from lidar.Histogram import Histogram
 
 class Simulation:
     """Singleton for managing simulation."""
@@ -32,7 +33,7 @@ class Simulation:
                                HTransform().translation(-0.002, 0, 0),
                                940e-9,
                                7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
-                               1e-9,
+                               0.5e-9,
                                1.010546, # 57.9deg for 10% signal from max
                                1.010546,
                                4
@@ -46,11 +47,11 @@ class Simulation:
                                  0.79,
                                  0.79,
                                  100,
-                                 1.25e-10
+                                 0.037
                                  )
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/flat_W105.stl",
+                        "res/cavity_H24_D30.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
@@ -94,7 +95,7 @@ class Simulation:
                                HTransform().translation(-0.002, 0, 0),
                                940e-9,
                                7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
-                               1e-9,
+                               0.5e-9,
                                1.010546, # 57.9deg for 10% signal from max
                                1.010546,
                                4
@@ -103,12 +104,12 @@ class Simulation:
                                  "res/sensor_toscale.stl",
                                  Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
                                  HTransform().translation(0.002, 0, 0),
-                                 8,
-                                 8,
+                                 4,
+                                 4,
                                  0.79,
                                  0.79,
                                  32,
-                                 1.25e-10
+                                 0.037
                                  )
                             for i, _ in enumerate(range(100, 201, 10))
                           ]
@@ -130,7 +131,7 @@ class Simulation:
         target.transform = HTransform().translation(0,0, offset) @ HTransform().rotation_x(np.pi)
         print("offset = ", offset)
         for i, mm in enumerate(range(100, 201, 10)):
-            z_offset = offset + i * 10e-3 # move target rfurther each step
+            z_offset = mm * 1e-3 # move target rfurther each step
             det = self.detectors[i]
             self.scene.add_obj(det)
             target.transform = HTransform().translation(0, 0, z_offset) @ HTransform().rotation_x(np.pi)
@@ -148,37 +149,26 @@ class Simulation:
             simresults[f"{mm}mm"] = H
 
         # # # IMPORT CSV # # #
-        N_SHIFT = 2  # Number of bins to shift to the right
-        N_ROW = 1
-        C = 3e8
-        BIN_WIDTH_M = C * self.detectors[0].bin_width
-
-        # Define the path to the directory containing the CSV files
+        # --- CSV LOAD (32 bins × 16 angular groups) into 4×4×32 ---
         directory = Path('res/CNHexpcsv')
-        results = {}  # { '100mm': np.ndarray shape (8,8,32) }
+        results = {}  # { '100mm': np.ndarray shape (4,4,32) }
 
-        # Iterate through CSV files named '100mm.csv' to '200mm.csv' in 10mm steps
-        def _expand_16_to_8x8(G16x32: np.ndarray) -> np.ndarray:
-            """
-            Map 16 angular groups (assumed 4×4, row-major: a0..a3 = top row, etc.)
-            to 8×8 by nearest-neighbour 2× upsampling in both axes.
-            If your physical mapping differs, edit the (gr,gc) computation.
-            """
-            out = np.zeros((8, 8, 32), dtype=float)
-            for a in range(16):
-                gr, gc = divmod(a, 4)  # 4×4 grid
-                r0, c0 = 2 * gr, 2 * gc  # each group covers a 2×2 block
-                block = np.tile(G16x32[a][None, None, :], (2, 2, 1))  # (2,2,32)
-                out[r0:r0 + 2, c0:c0 + 2, :] = block
-            return out
+        N_ROW = 1  # read only first row
+        N_SHIFT_CONST = 0  # optional fixed bin shift (usually 0)
+
+        def a_to_rc(a: int) -> tuple[int, int]:
+            """Map angular group index a∈[0..15] to 4×4 (row, col), row-major."""
+            r, c = divmod(a, 4)
+            return r, c
 
         for mm in range(100, 201, 10):
             file_path = directory / f"{mm}mm.csv"
             try:
                 df = pd.read_csv(file_path, nrows=N_ROW)
+                # target array
+                G = np.zeros((4, 4, 32), dtype=float)
 
-                # Collect 32-bin vectors for a0..a15 with bin shift to the right
-                G = np.zeros((16, 32), dtype=float)
+                # 1) fill raw counts
                 for col in df.columns:
                     m = re.match(r'^cnh__hist_bin_(\d{1,2})_a(\d{1,2})$', col)
                     if not m:
@@ -186,15 +176,34 @@ class Simulation:
                     b = int(m.group(1))
                     a = int(m.group(2))
                     if 0 <= b < 32 and 0 <= a < 16:
-                        bi = b + N_SHIFT
-                        if bi < 32:
-                            G[a, bi] = float(df[col].iloc[N_ROW - 1])
+                        r, c = a_to_rc(a)
+                        bi = b + N_SHIFT_CONST
+                        if 0 <= bi < 32:
+                            G[r, c, bi] = float(df[col].iloc[N_ROW - 1])
 
-                # clip negatives (sensor noise/offsets) before normalization later
+                # 2) (optional) clip negatives from CSV
                 G = np.clip(G, 0.0, None)
 
-                # Expand 16 groups → 8×8 pixels
-                results[f"{mm}mm"] = _expand_16_to_8x8(G)
+                # 3) dynamic alignment of the experimental histogram using distance_mm_za*
+                #    – this shifts each (r,c) trace so that its peak roughly matches the measured range
+                #    – turn off if your CSV already starts bins at the correct physical zero.
+                BIN_WIDTH_M = self.detectors[0].bin_width_m  # meters per bin (one-way)
+                for a in range(16):
+                    r, c = a_to_rc(a)
+                    dz_col = f'distance_mm_z{a}'
+                    if dz_col in df.columns:
+                        d_m = float(df[dz_col].iloc[N_ROW - 1]) * 1e-3  # mm -> m
+                        # Predicted bin of the main return (assuming one-way distance bins)
+                        # If your device histogram is round-trip, use: b_pred = int(round((2*d_m)/BIN_WIDTH_M))
+                        b_pred = int(round(d_m / BIN_WIDTH_M))
+                        # Current peak bin from data
+                        b_peak = int(np.argmax(G[r, c, :])) if G[r, c, :].sum() > 0 else 0
+                        # Shift to align peak ~ expected bin
+                        delta = b_pred - b_peak
+                        if delta != 0:
+                            G[r, c, :] = np.roll(G[r, c, :], delta)
+
+                results[f"{mm}mm"] = G
 
             except FileNotFoundError:
                 print(f"File not found: {file_path.name}. Skipping.")
@@ -202,21 +211,20 @@ class Simulation:
                 print(f"Error processing {file_path.name}: {e}")
 
         # # # PLOT SIM VS REAL # # #
-        R_SEL, C_SEL = 4, 4
-        fig, axes = plt.subplots(4, 3, figsize=(12, 8))  # 4x4 grid, adjust figsize as needed
-        axes = axes.flatten()  # Flatten to easily iterate over
+        R_SEL, C_SEL = 0, 0
+        fig, axes = plt.subplots(4, 3, figsize=(12, 8))
+        axes = axes.flatten()
 
         for idx, mm in enumerate(range(100, 201, 10)):
             dict_name = f"{mm}mm"
 
-            # Normalize simulated histogram
-            sim_counts = simresults[dict_name][R_SEL, C_SEL]
-            sim_total = sim_counts.sum()
-            sim_counts = (sim_counts / sim_total) if sim_total > 0 else np.zeros_like(sim_counts)
+            # --- RAW counts (do not normalise in-place) ---
+            sim_raw = simresults[dict_name][R_SEL, C_SEL].copy()  # shape (32,)
+            exp_raw = results[dict_name][R_SEL, C_SEL].copy()  # shape (32,)
 
-            # Normalize experimental histogram
-            exp_counts = results[dict_name][R_SEL, C_SEL]
-            exp_counts /= np.sum(exp_counts)
+            # --- Normalised for plotting ---
+            sim_counts = sim_raw / sim_raw.sum() if sim_raw.sum() > 0 else np.zeros_like(sim_raw)
+            exp_counts = exp_raw / exp_raw.sum() if exp_raw.sum() > 0 else np.zeros_like(exp_raw)
 
             bin_edges = np.arange(32) * BIN_WIDTH_M
             bin_centers = bin_edges + BIN_WIDTH_M / 2
@@ -225,6 +233,21 @@ class Simulation:
             ax.bar(bin_centers, exp_counts, width=BIN_WIDTH_M * 0.9, alpha=0.6, label="Experimental", color="red")
             ax.step(bin_centers, sim_counts, where='mid', label="Simulated", color="blue", linewidth=2)
 
+            # --- DETECTION POINTS (metres) using Histogram.get_points_echo_detection ---
+            h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
+            h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
+
+            exp_pts_m = h_exp.get_points_echo_detection()
+            sim_pts_m = h_sim.get_points_echo_detection()
+
+            # draw vertical lines at detected points
+            for k, x in enumerate(exp_pts_m):
+                ax.axvline(x, linestyle=':', linewidth=1.6,
+                           label=("Exp detections" if (idx == 0 and k == 0) else None))
+            for k, x in enumerate(sim_pts_m):
+                ax.axvline(x, linestyle='--', linewidth=1.6,
+                           label=("Sim detections" if (idx == 0 and k == 0) else None))
+
             ax.set_title(f"{mm} mm")
             ax.set_xlabel("Distance (m)")
             ax.set_ylabel("Normalized Counts")
@@ -232,8 +255,8 @@ class Simulation:
             if idx == 0:
                 ax.legend()
 
-        # Hide any unused subplots (if less than 16)
-        for j in range(idx + 1, 12):
+        # Hide any unused axes (if any)
+        for j in range(idx + 1, len(axes)):
             fig.delaxes(axes[j])
 
         plt.tight_layout()
@@ -267,15 +290,15 @@ class Simulation:
         plt.figure(figsize=(6, 5))
         plt.imshow(KL_mean, cmap='viridis', aspect='equal', interpolation='nearest')
         plt.colorbar(label="Mean KL (exp || sim)")
-        plt.xticks(range(8), [f"C{c}" for c in range(8)])
-        plt.yticks(range(8), [f"R{r}" for r in range(8)])
+        plt.xticks(range(4), [f"C{c}" for c in range(4)])
+        plt.yticks(range(4), [f"R{r}" for r in range(4)])
         plt.title("Mean KL Divergence per Pixel (100–200 mm)")
         plt.tight_layout()
         plt.show()
 
 
-sim = Simulation()
-sim.run_kl_test()
 # sim = Simulation()
-# sim.view_scene_trimesh()
-# sim.run()
+# sim.run_kl_test()
+sim = Simulation()
+sim.view_scene_trimesh()
+sim.run()

@@ -20,20 +20,20 @@ class Detector(SceneObject):
     fov_x_rad: float
     fov_y_rad: float
     bin_count: int
-    bin_width_: float
+    bin_width_m: float
     histograms: np.ndarray
 
     def __init__(self, name, mesh_path, material, transform, zone_rows, zone_cols, fov_x_rad, fov_y_rad, bin_count,
-                 bin_width):
+                 bin_width_m):
         super().__init__(name, mesh_path, material, transform)
         self.zone_rows = zone_rows
         self.zone_cols = zone_cols
         self.fov_x_rad = fov_x_rad
         self.fov_y_rad = fov_y_rad
         self.bin_count = bin_count
-        self.bin_width = bin_width
+        self.bin_width_m = bin_width_m
         self.histograms = np.array(
-            [[Histogram(0, 0, bin_count, bin_width) for _ in range(zone_cols)]
+            [[Histogram(0, 0, bin_count, bin_width_m) for _ in range(zone_cols)]
              for _ in range(zone_rows)],
             dtype=object
         )
@@ -45,10 +45,16 @@ class Detector(SceneObject):
         K /= K.sum() # normalise
         return K
 
-    def apply_binning(self, distances, row_idx, col_idx, bleed = True, psf_size = 3, psf_sigma = 0.3):
+    def apply_binning(self, distances, row_idx, col_idx, bleed = True):
         """ Apply SPAD finite time-resolution binning. """
-        distances = np.array(distances) / 3e8
-        binned_distances = np.floor(distances / self.bin_width).astype(int)
+        if self.zone_rows == 4:
+            psf_size = 2
+            psf_sigma = 0.1
+        elif self.zone_rows == 8:
+            psf_size = 5
+            psf_sigma = 0.6
+
+        binned_distances = np.floor(distances / self.bin_width_m).astype(int)
 
         # Valid hits: in-range time bin and pixel indices
         valid = (
@@ -101,7 +107,7 @@ class Detector(SceneObject):
         """Uniform bin edges in seconds for the detector histograms (assumes all zones share layout)."""
         h = self.histograms[0, 0]
         t0 = h.time_start
-        return np.linspace(t0, t0 + h.bin_count * h.bin_width, h.bin_count + 1)
+        return np.linspace(t0, t0 + h.bin_count * h.bin_width_m, h.bin_count + 1)
 
     def get_range_edges_m(self, *, round_trip: bool = True) -> np.ndarray:
         """Distance edges derived from the time edges (for plotting); round-trip by default."""
@@ -115,7 +121,7 @@ class Detector(SceneObject):
             [Histogram(0,
                        0,
                        self.bin_count,
-                       self.bin_width,
+                       self.bin_width_m,
                        data=np.array([random.uniform(0, 1) for _ in range(self.bin_count)], dtype=float)
                        ) for _ in range(self.zone_cols)
              ] for _ in range(self.zone_rows)

@@ -103,7 +103,8 @@ class RayTracer:
             )
 
         # apply pulse broadening and binning
-        noisy_distances = emitter.apply_vcsel_pulse_broadening(los_dists)
+        one_way_tof = 0.5 * los_dists
+        noisy_distances = emitter.apply_vcsel_pulse_broadening(one_way_tof)
         detector.apply_binning(noisy_distances, row_idx, col_idx)
 
         # = = = = = = = = = = = = = = = = VIZUALISER = = = = = = = = = = = = =
