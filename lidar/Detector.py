@@ -1,6 +1,7 @@
 from raysect.core import AffineMatrix3D
 from raysect.optical.observer import PinholeCamera
 from raysect.optical.observer.base.observer import MulticoreEngine
+from scipy.signal.windows import gaussian
 
 from lidar.HistogramAccumulator import HistogramAccumulatorToF, HistogramAccumulatorToF
 from lidar.ToFPinholeCamera import ToFPinholeCamera
@@ -37,7 +38,14 @@ class Detector(SceneObject):
             dtype=object
         )
 
-    def apply_binning(self, distances, row_idx, col_idx):
+    def gaussian_kernel(self, size, sigma):
+        offsets = np.arange(size) - (size - 1) / 2.0
+        gridx, gridy = np.meshgrid(offsets, offsets, indexing='xy')
+        K = np.exp(-(gridx**2 + gridy**2) / (2.0 * sigma**2)) # kernel
+        K /= K.sum() # normalise
+        return K
+
+    def apply_binning(self, distances, row_idx, col_idx, bleed = True, psf_size = 3, psf_sigma = 0.3):
         """ Apply SPAD finite time-resolution binning. """
         distances = np.array(distances) / 3e8
         binned_distances = np.floor(distances / self.bin_width).astype(int)
@@ -59,12 +67,34 @@ class Detector(SceneObject):
         H = np.zeros((self.zone_rows, self.zone_cols, self.bin_count), dtype=float)
         np.add.at(H, (rows, cols, counts), 1.0)
 
+        # bleed across zones with a gaussian kernel
+        if (bleed):
+            # Build PSF kernel and pad once in space 
+            K = self.gaussian_kernel(psf_size, psf_sigma)
+            pad = psf_size // 2
+
+            # Pad only spatial dimensions; reflect padding conserves energy visually at borders
+            H_padded = np.pad(H, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
+
+            # 2D convolution per time bin
+            Hp = np.zeros_like(H)
+            for b in range(self.bin_count):
+                # slide the kernel over the (padded) spatial plane for this bin
+                for r in range(self.zone_rows):
+                    for c in range(self.zone_cols):
+                        # extract a psf_size x psf_size window and dot with kernel
+                        window = H_padded[r:r + psf_size, c:c + psf_size, b]
+                        Hp[r, c, b] = np.sum(window * K)
+
+            H = Hp  # spatially mixed histograms
+
         # normalise
         max_per = H.max(axis=2, keepdims=True)
         np.divide(H, max_per, out=H, where=max_per > 0)
 
-        for row, col in np.unique(np.stack([rows, cols], axis=1), axis=0):
-            self.histograms[row, col].data = H[row, col]
+        for r in range(self.zone_rows):
+            for c in range(self.zone_cols):
+                self.histograms[r, c].data = H[r, c]
 
 
     def get_tof_edges_s(self) -> np.ndarray:
