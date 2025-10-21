@@ -20,7 +20,7 @@ class Detector(SceneObject):
     fov_x_rad: float
     fov_y_rad: float
     bin_count: int
-    bin_width: float
+    bin_width_: float
     histograms: np.ndarray
 
     def __init__(self, name, mesh_path, material, transform, zone_rows, zone_cols, fov_x_rad, fov_y_rad, bin_count,
@@ -69,7 +69,7 @@ class Detector(SceneObject):
 
         # bleed across zones with a gaussian kernel
         if (bleed):
-            # Build PSF kernel and pad once in space 
+            # Build PSF kernel and pad once in space
             K = self.gaussian_kernel(psf_size, psf_sigma)
             pad = psf_size // 2
 

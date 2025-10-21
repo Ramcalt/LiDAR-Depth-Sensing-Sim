@@ -11,7 +11,7 @@ class RayTracer:
         pass
 
     @staticmethod
-    def run_trimesh(scene, target, emitter, detector, N):
+    def run_trimesh(scene, target, emitter, detector, N, visualise=False):
         # construct trimesh scene
         target_mesh = target.to_trimesh_mesh()
         emitter_mesh = emitter.to_trimesh_mesh()
@@ -48,6 +48,11 @@ class RayTracer:
         sec_dirs = np.divide(v_hd, seg_lengths[:, None], out=np.zeros_like(v_hd), where=seg_lengths[:, None] > 0)
         sec_origins = primary_hit_locations + sec_dirs * EPS
         _, sec_idx_ray, sec_locations = target_mesh.ray.intersects_id(sec_origins, sec_dirs, multiple_hits=False, max_hits=1, return_locations=True)
+        # normalise to (K,3) even when empty
+        if sec_locations is None or np.size(sec_locations) == 0:
+            sec_locations = np.empty((0, 3), dtype=float)
+        else:
+            sec_locations = np.asarray(sec_locations, dtype=float).reshape(-1, 3)
 
         # filter rays that have intersections with the target_mesh before hitting the detector mesh
         blocker_dists = np.linalg.norm(sec_locations - sec_origins[sec_idx_ray], axis=1)
@@ -102,43 +107,44 @@ class RayTracer:
         detector.apply_binning(noisy_distances, row_idx, col_idx)
 
         # = = = = = = = = = = = = = = = = VIZUALISER = = = = = = = = = = = = =
-        # Visualize rays: always one secondary segment per displayed primary hit
-        ray_lines = []
-        k = min(20, len(primary_hit_locations))
+        if (visualise):
+            # Visualize rays: always one secondary segment per displayed primary hit
+            ray_lines = []
+            k = min(20, len(primary_hit_locations))
 
-        # Map: secondary ray index -> its first blocker point (since max_hits=1)
-        blocker_for_ray = {rid: loc for rid, loc in zip(sec_idx_ray, sec_locations)}
+            # Map: secondary ray index -> its first blocker point (since max_hits=1)
+            blocker_for_ray = {rid: loc for rid, loc in zip(sec_idx_ray, sec_locations)}
 
-        for i in range(k):
-            o = primary_hit_origins[i]
-            p = primary_hit_locations[i]
+            for i in range(k):
+                o = primary_hit_origins[i]
+                p = primary_hit_locations[i]
 
-            # Primary: emitter -> target hit (red)
-            seg_primary = trimesh.load_path(np.vstack((o, p)))
-            seg_primary.colors = np.tile([255, 0, 0, 140], (seg_primary.entities.shape[0], 1))
-            ray_lines.append(seg_primary)
+                # Primary: emitter -> target hit (red)
+                seg_primary = trimesh.load_path(np.vstack((o, p)))
+                seg_primary.colors = np.tile([255, 0, 0, 140], (seg_primary.entities.shape[0], 1))
+                ray_lines.append(seg_primary)
 
-            # Secondary: choose endpoint & color
-            has_los = (i < len(los_mask)) and bool(los_mask[i])
-            if has_los:
-                q = destination
-                color = [0, 255, 0, 140]  # green
-            else:
-                q = blocker_for_ray.get(i, destination)  # if no blocker recorded, still draw to detector
-                color = [255, 165, 0, 140]  # orange
+                # Secondary: choose endpoint & color
+                has_los = (i < len(los_mask)) and bool(los_mask[i])
+                if has_los:
+                    q = destination
+                    color = [0, 255, 0, 140]  # green
+                else:
+                    q = blocker_for_ray.get(i, destination)  # if no blocker recorded, still draw to detector
+                    color = [255, 165, 0, 140]  # orange
 
-            # Ensure non-degenerate segment (very rare but avoids zero-length path)
-            if np.allclose(p, q):
-                q = p + (destination - p) * 1e-6
+                # Ensure non-degenerate segment (very rare but avoids zero-length path)
+                if np.allclose(p, q):
+                    q = p + (destination - p) * 1e-6
 
-            seg_secondary = trimesh.load_path(np.vstack((p, q)))
-            seg_secondary.colors = np.tile(color, (seg_secondary.entities.shape[0], 1))
-            ray_lines.append(seg_secondary)
+                seg_secondary = trimesh.load_path(np.vstack((p, q)))
+                seg_secondary.colors = np.tile(color, (seg_secondary.entities.shape[0], 1))
+                ray_lines.append(seg_secondary)
 
-        for ray in ray_lines:
-            tri_scene.add_geometry(ray)
+            for ray in ray_lines:
+                tri_scene.add_geometry(ray)
 
-        tri_scene.show()
+            tri_scene.show()
 
     @staticmethod
     def run_rs(scene, emitter, detector):

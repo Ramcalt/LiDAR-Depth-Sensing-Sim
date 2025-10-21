@@ -6,51 +6,42 @@ from scene.SceneObject import SceneObject
 import numpy as np
 from scipy.special import gamma
 
-def gaussian_line_sf(center_nm: float,
+def gaussian_line_sf(center_m: float,
                      total_power: float,
-                     fwhm_nm: float = 5.0,
-                     wl_min: int = 100,
-                     wl_max: int = 1100,
-                     step_nm: int = 1) -> InterpolatedSF:
-    """
-    Build a narrowband spectral function with Gaussian shape centered at `center_nm`.
-    The discrete area (sum * step_nm) is normalised to `total_power`.
-
-    Returns an InterpolatedSF suitable for UniformSurfaceEmitter.
-    """
-    wavelengths = np.arange(wl_min, wl_max + step_nm, step_nm, dtype=float)
-    sigma = float(fwhm_nm) / 2.354820045  # FWHM -> sigma
-    profile = np.exp(-0.5 * ((wavelengths - center_nm) / sigma) ** 2)
-
-    # Normalise so that the discrete integral equals total_power
-    area = profile.sum() * step_nm
+                     fwhm_m: float = 5e-9,
+                     wl_min_m: float = 100e-9,
+                     wl_max_m: float = 1100e-9,
+                     step_m: float = 1e-9) -> InterpolatedSF:
+    """Wavelength grid in meters; profile integrates (sum * step_m) to total_power [W]."""
+    wavelengths = np.arange(wl_min_m, wl_max_m + step_m, step_m, dtype=float)
+    sigma = float(fwhm_m) / 2.354820045
+    profile = np.exp(-0.5 * ((wavelengths - center_m) / sigma) ** 2)
+    area = profile.sum() * step_m
     if area > 0.0:
         profile *= (total_power / area)
-
-    # No extrapolation outside the defined grid
-    return InterpolatedSF(wavelengths, profile)
+    return InterpolatedSF(wavelengths, profile)  # wavelengths now in meters
 
 
 class Emitter(SceneObject):
-    wavelength: float
-    pulse_energy: float
-    pulse_width: float
-    pulse_length: float
-    pulse_average_power: float
+    wavelength_m: float
+    pulse_energy_J: float
+    pulse_width_s: float
+    pulse_length_m: float
+    pulse_average_power_W: float
     emission_angle_x_rad: float # defined as 1/e^2 gaussian beam
     emission_angle_y_rad: float # defined as 1/e^2 gaussian beam
     gaussian_exponent: float # exponent for super gaussian function
     c: float = 3e8
 
 
-    def __init__(self, name, mesh_path, material, transform, wavelength, pulse_energy, pulse_width,
+    def __init__(self, name, mesh_path, material, transform, wavelength_m, pulse_energy_J, pulse_width_s,
                  emission_angle_x_rad, emission_angle_y_rad, gaussian_exponent):
         super().__init__(name, mesh_path, material, transform)
-        self.wavelength = wavelength
-        self.pulse_energy = pulse_energy
-        self.pulse_width = pulse_width
-        self.pulse_length = (self.c * self.pulse_width)
-        self.pulse_average_power = pulse_energy / pulse_width
+        self.wavelength_m = wavelength_m
+        self.pulse_energy_J = pulse_energy_J
+        self.pulse_width_s = pulse_width_s
+        self.pulse_length_m = (self.c * self.pulse_width_s)
+        self.pulse_average_power_W = pulse_energy_J / pulse_width_s
         self.emission_angle_x_rad = emission_angle_x_rad
         self.emission_angle_y_rad = emission_angle_y_rad
         self.gaussian_exponent = gaussian_exponent
@@ -58,16 +49,18 @@ class Emitter(SceneObject):
 
     def apply_vcsel_pulse_broadening(self, distances):
         """ Apply a random broadening due to VCSEL pulse shape. """
-        random_pulse_delay = np.random.uniform(0, self.pulse_length, size=distances.shape)
-        return distances + random_pulse_delay
+        sigma = self.pulse_length_m / 2.355 # Convert FWHM to standard devication
+        gaussian_noise = np.random.normal(loc=0.0, scale=sigma, size=distances.shape)
+        broadened = distances + gaussian_noise
+        return np.clip(broadened, a_min=0.0, a_max=None)
 
     def gaussian_beam(self, z, rx, ry):
         """ Equation for power normalised gaussian beam f(x,y,z) """
-        w0x = self.wavelength / (np.pi * self.emission_angle_x_rad)
-        w0y = self.wavelength / (np.pi * self.emission_angle_y_rad)
-        wx = w0x * np.sqrt(1 + ((self.wavelength * z) / (np.pi * w0x**2))**2)
-        wy = w0y * np.sqrt(1 + ((self.wavelength * z) / (np.pi * w0y**2))**2)
-        P = self.pulse_average_power
+        w0x = self.wavelength_m / (np.pi * self.emission_angle_x_rad)
+        w0y = self.wavelength_m / (np.pi * self.emission_angle_y_rad)
+        wx = w0x * np.sqrt(1 + ((self.wavelength_m * z) / (np.pi * w0x**2))**2)
+        wy = w0y * np.sqrt(1 + ((self.wavelength_m * z) / (np.pi * w0y**2))**2)
+        P = self.pulse_average_power_W
         p = self.gaussian_exponent
         A = (P * p ** 2) / ((2 ** (2 - 2 / p)) * (gamma(1 / p) ** 2) * wx * wy) # normalised by total power
         return A * np.exp(-2*((np.abs(rx)**p/wx**p) + (np.abs(ry)**p/wy**p)))
@@ -114,9 +107,9 @@ class Emitter(SceneObject):
         for xi in x:
             for yi in y:
                 sum += dx * dy * self.gaussian_beam(z, xi, yi)
-        print("pulse power ", self.pulse_average_power)
+        print("pulse power ", self.pulse_average_power_W)
         print("sum ", sum)
-        print("ratio ", sum/self.pulse_average_power)
+        print("ratio ", sum/self.pulse_average_power_W)
 
         x = np.linspace(-self.emission_angle_x_rad, self.emission_angle_x_rad, 1000)
         y = np.linspace(-self.emission_angle_y_rad, self.emission_angle_y_rad, 1000)
@@ -130,12 +123,13 @@ class Emitter(SceneObject):
         print("ratio ", sum)
 
     def to_raysect_emitter(self, world):
-        power = self.pulse_energy / self.pulse_width  # units depend on your scene calibration
-
         spectral_radiance_sf = gaussian_line_sf(
-            center_nm=self.wavelength,
-            total_power=power,
-            fwhm_nm=100
+            center_m=self.wavelength_m,
+            total_power=self.pulse_average_power_W,
+            fwhm_m=100e-9,  # was 100 nm
+            wl_min_m=100e-9,
+            wl_max_m=1100e-9,
+            step_m=1e-9
         )
 
         emitter_material = UniformSurfaceEmitter(spectral_radiance_sf)
