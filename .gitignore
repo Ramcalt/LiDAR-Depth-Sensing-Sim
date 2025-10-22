@@ -83,3 +83,4 @@ http-client.private.env.json
 .idea/ApifoxUploaderProjectSetting.xml
 
 __pycache__/
+.DS_Store

@@ -47,7 +47,7 @@ class Simulation:
                                  0.79,
                                  0.79,
                                  100,
-                                 0.037
+                                 0.0375
                                  )
         self.scene.add_obj(
             SceneObject("cavity",
@@ -65,8 +65,7 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        # self.detector.fill_hist_with_noise()
-        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 100_000)
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 1_000)
         self.view_plots()
 
     def view_scene(self):
@@ -83,9 +82,10 @@ class Simulation:
 
     def view_plots(self):
         """Runs matplotlib plots in separate processes"""
-        Plotter.new_process(Plotter.plot_hist, self.detector.histograms[0][0])
-        Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
-        Plotter.new_process(Plotter.plot_points, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        # Plotter.new_process(Plotter.plot_hist, self.detector.histograms[0][0])
+        # Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        # Plotter.new_process(Plotter.plot_points, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
 
     def init_kl_test(self):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
@@ -109,7 +109,7 @@ class Simulation:
                                  0.79,
                                  0.79,
                                  32,
-                                 0.037
+                                 0.0375
                                  )
                             for i, _ in enumerate(range(100, 201, 10))
                           ]

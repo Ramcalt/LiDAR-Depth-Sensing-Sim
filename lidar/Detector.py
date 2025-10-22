@@ -1,11 +1,4 @@
-from raysect.core import AffineMatrix3D
-from raysect.optical.observer import PinholeCamera
-from raysect.optical.observer.base.observer import MulticoreEngine
 from scipy.signal.windows import gaussian
-
-from lidar.HistogramAccumulator import HistogramAccumulatorToF, HistogramAccumulatorToF
-from lidar.ToFPinholeCamera import ToFPinholeCamera
-from lidar.ToFPipeline2D import ToFPipeline2D
 from scene.SceneObject import SceneObject
 from lidar.Histogram import Histogram
 from typing import List
@@ -102,20 +95,6 @@ class Detector(SceneObject):
             for c in range(self.zone_cols):
                 self.histograms[r, c].data = H[r, c]
 
-
-    def get_tof_edges_s(self) -> np.ndarray:
-        """Uniform bin edges in seconds for the detector histograms (assumes all zones share layout)."""
-        h = self.histograms[0, 0]
-        t0 = h.time_start
-        return np.linspace(t0, t0 + h.bin_count * h.bin_width_m, h.bin_count + 1)
-
-    def get_range_edges_m(self, *, round_trip: bool = True) -> np.ndarray:
-        """Distance edges derived from the time edges (for plotting); round-trip by default."""
-        t_edges = self.get_tof_edges_s()
-        if round_trip:
-            return 0.5 * C * t_edges
-        return C * t_edges
-
     def fill_hist_with_noise(self):
         self.histograms = np.array([
             [Histogram(0,
@@ -126,45 +105,3 @@ class Detector(SceneObject):
                        ) for _ in range(self.zone_cols)
              ] for _ in range(self.zone_rows)
         ], dtype=object)
-
-    def to_raysect_detector(self, world, pipelines):
-        detector = PinholeCamera((512, 512), pipelines=[pipelines], transform=AffineMatrix3D(self.transform.matrix))
-        detector.fov = np.rad2deg(self.fov_x_rad)
-        detector.spectral_rays = 1
-        detector.spectral_bins = 20
-        detector.ray_max_depth = 100
-        detector.ray_extinction_prob = 0.1
-        detector.min_wavelength = 100.0
-        detector.max_wavelength = 1100.0
-        detector.parent = world
-        return detector
-
-    def to_raysect_tof_detector(self, world):
-        """
-        Build a ToF pipeline + ToF camera that will fill self.histograms.
-        The third argument in RayTracer.run(...) is kept for API compatibility,
-        but ignored now that the pipeline bins in time.
-        """
-        # Bridge: distance -> time-of-flight -> histogram bin
-        on_bin = HistogramAccumulatorToF(self.histograms, round_trip=True)
-        tof_pipeline = ToFPipeline2D(on_bin=on_bin)
-
-        cam = ToFPinholeCamera(pixels=(self.zone_cols, self.zone_rows), tof_pipeline=tof_pipeline)
-        cam.parent = world
-        cam.transform = AffineMatrix3D(self.transform.matrix)
-
-        cam.fov = np.rad2deg(self.fov_x_rad)
-        cam.pixel_samples = 1
-
-        # *** CRITICAL: set waveband to match your emitter line ***
-        cam.max_wavelength = 930.0
-        cam.min_wavelength = 880.0
-        cam.spectral_bins = 1
-
-        cam.ray_max_depth = 50
-        cam.ray_extinction_prob = 0.0
-
-        # sanity: assert pipeline is attached
-        assert tof_pipeline in cam.pipelines, "ToF pipeline not attached to camera"
-
-        return cam, tof_pipeline

@@ -1,26 +1,6 @@
-from raysect.core import AffineMatrix3D
-from raysect.optical import UniformSurfaceEmitter, InterpolatedSF
-from raysect.primitive import import_stl
-
 from scene.SceneObject import SceneObject
 import numpy as np
 from scipy.special import gamma
-
-def gaussian_line_sf(center_m: float,
-                     total_power: float,
-                     fwhm_m: float = 5e-9,
-                     wl_min_m: float = 100e-9,
-                     wl_max_m: float = 1100e-9,
-                     step_m: float = 1e-9) -> InterpolatedSF:
-    """Wavelength grid in meters; profile integrates (sum * step_m) to total_power [W]."""
-    wavelengths = np.arange(wl_min_m, wl_max_m + step_m, step_m, dtype=float)
-    sigma = float(fwhm_m) / 2.354820045
-    profile = np.exp(-0.5 * ((wavelengths - center_m) / sigma) ** 2)
-    area = profile.sum() * step_m
-    if area > 0.0:
-        profile *= (total_power / area)
-    return InterpolatedSF(wavelengths, profile)  # wavelengths now in meters
-
 
 class Emitter(SceneObject):
     wavelength_m: float
@@ -122,23 +102,3 @@ class Emitter(SceneObject):
         print("sum ", sum)
         print("ratio ", sum)
 
-    def to_raysect_emitter(self, world):
-        spectral_radiance_sf = gaussian_line_sf(
-            center_m=self.wavelength_m,
-            total_power=self.pulse_average_power_W,
-            fwhm_m=100e-9,  # was 100 nm
-            wl_min_m=100e-9,
-            wl_max_m=1100e-9,
-            step_m=1e-9
-        )
-
-        emitter_material = UniformSurfaceEmitter(spectral_radiance_sf)
-        emitter = import_stl(
-            self.mesh_path,
-            scaling=1,
-            mode='binary',
-            parent=world,
-            transform=AffineMatrix3D(self.transform.matrix),
-            material=emitter_material
-        )
-        return emitter
