@@ -85,7 +85,7 @@ class Simulation:
         # Plotter.new_process(Plotter.plot_hist, self.detector.histograms[0][0])
         # Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
         # Plotter.new_process(Plotter.plot_points, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
-        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m)
 
     def init_kl_test(self):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])

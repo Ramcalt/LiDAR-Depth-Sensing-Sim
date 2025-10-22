@@ -80,39 +80,34 @@ class Plotter:
         plt.show()
 
     @staticmethod
-    def plot_points(hists, rows, cols):
-        # Create a 3D axis (bar3d is a method on Axes3D, not pyplot)
+    def plot_points(hists, rows, cols, pulse_width_m):
+        # Create a 3D axis
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
         ys, xs = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
         x = xs.ravel().astype(float)
         y = ys.ravel().astype(float)
-        z = np.zeros_like(x)
-        dx = np.ones_like(x)
-        dy = np.ones_like(x)
-        dz = np.zeros(rows * cols, dtype=float)
-        # Fill dz with the first echo point value if it exists
-        max = -1000000000.0
-        min = 1000000000.0
+
+        # Clear axes
+        ax.cla()
+
+        # Iterate over each histogram cell
         for yy in range(rows):
             for xx in range(cols):
-                points = hists[yy][xx].get_points_echo_detection()
-                if points:
-                    dz[yy * cols + xx] = points[0]  # flattening 2D indices
-                    if points[0] > max:
-                        max = points[0]
-                    if points[0] < min:
-                        min = points[0]
-        # dz = np.array([hists[yy][xx].get_points_echo_detection()[0]
-        #                for yy in range(rows) for xx in range(cols)], dtype=float)
-        # 3D bar plot
-        ax.bar3d(x, y, z, dx, dy, dz, shade=True)
+                points = hists[yy][xx].get_points_echo_detection(pulse_width_m)
+                if points is None or len(points) == 0:
+                    continue
+
+                # Draw a point for each echo detection
+                for p in points:
+                    ax.scatter(xx, yy, p, color='b', s=20)  # point marker
+                    # Draw a vertical line down to z=0
+                    ax.plot([xx, xx], [yy, yy], [0, p], color='gray', linewidth=1)
 
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('value')
-        print(f"depth = {max - min}")
         plt.show()
 
     @staticmethod
