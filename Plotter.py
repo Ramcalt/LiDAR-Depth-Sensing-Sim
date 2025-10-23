@@ -1,18 +1,9 @@
 import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.colors import LogNorm
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.pyplot import tight_layout
 from matplotlib.widgets import Slider
-from lidar.Histogram import Histogram
 from multiprocessing import Process
-import os
-import re
-import glob
-import math
-import pandas as pd
-from IPython.display import display, clear_output
-from ipywidgets import interact, IntSlider, VBox, HBox, HTML
+import numpy as np
+import plotly.graph_objects as go
+import plotly.io as pio
 
 class Plotter:
     def __init__(self):
@@ -81,6 +72,42 @@ class Plotter:
 
     @staticmethod
     def plot_points(hists, rows, cols, pulse_width_m):
+        # use browser renderer to avoid terminal output
+        pio.renderers.default = "browser"
+
+        xs, ys, zs = [], [], []
+        for yy in range(rows):
+            for xx in range(cols):
+                pts = hists[yy][xx].get_points_echo_detection(pulse_width_m)
+                if pts is None or len(pts) == 0:
+                    continue
+                for p in pts:
+                    xs.append(xx)
+                    ys.append(yy)
+                    zs.append(p)
+
+        fig = go.Figure(
+            data=[go.Scatter3d(
+                x=xs, y=ys, z=zs,
+                mode='markers',
+                marker=dict(size=3, color=zs, colorscale='Viridis', opacity=0.8)
+            )]
+        )
+        fig.update_layout(
+            scene=dict(
+                xaxis_title='X (cols)',
+                yaxis_title='Y (rows)',
+                zaxis_title='Range (m)',
+            ),
+            title="Echo Detections (3D)",
+            template="plotly_white",
+            height=700
+        )
+
+        fig.show()  # opens in browser, cleanly
+
+    @staticmethod
+    def plot_points_matplot(hists, rows, cols, pulse_width_m):
         # Create a 3D axis
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')

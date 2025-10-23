@@ -44,8 +44,8 @@ class Detector(SceneObject):
             psf_size = 2
             psf_sigma = 0.1
         elif self.zone_rows == 8:
-            psf_size = 5
-            psf_sigma = 0.6
+            psf_size = 4
+            psf_sigma = 0.2
 
         binned_distances = np.floor(distances / self.bin_width_m).astype(int)
 

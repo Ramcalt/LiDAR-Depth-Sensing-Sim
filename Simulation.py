@@ -51,7 +51,7 @@ class Simulation:
                                  )
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/cavity_H24_D30.stl",
+                        "res/flat_W105.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
@@ -65,7 +65,7 @@ class Simulation:
 
     def run(self):
         """Run the simulation"""
-        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 1_000)
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 100_000)
         self.view_plots()
 
     def view_scene(self):
@@ -82,10 +82,63 @@ class Simulation:
 
     def view_plots(self):
         """Runs matplotlib plots in separate processes"""
-        # Plotter.new_process(Plotter.plot_hist, self.detector.histograms[0][0])
-        # Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
-        # Plotter.new_process(Plotter.plot_points, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        # PLOT HISTOGRAMS
+        Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
+        # COMPUTE DEPTH
+        points = []
+        for r in range(self.detector.zone_rows):
+            for c in range(self.detector.zone_cols):
+                pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m)
+                if pts is not None and len(pts) > 0:
+                    points.extend(pts)
+        points = np.array(points, dtype=float)
+        points = points[points > 0]
+        print(f"depth = {np.max(points) - np.min(points)}")
+        # SHOW POINTS
         Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m)
+        # SHOW HISTOGRAM PROCESSING
+        self.select_and_visualize()
+
+    def select_and_visualize(self):
+        """Allow user to select which histogram cell(s) to visualize via terminal input."""
+        rows = self.detector.zone_rows
+        cols = self.detector.zone_cols
+        pulse_width_m = self.emitter.pulse_length_m
+
+        print(f"\nDetector grid: {rows} rows × {cols} columns")
+        print("Enter indices to visualize specific cells (e.g. '1 3'), or 'all' to view all cells.")
+        print("Type 'q' or 'quit' to exit.\n")
+
+        while True:
+            user_input = input("Select cell (row col): ").strip().lower()
+            if user_input in ("q", "quit", "exit"):
+                print("Exiting visualization.")
+                break
+
+            if user_input == "all":
+                for r in range(rows):
+                    for c in range(cols):
+                        Plotter.new_process(
+                            self.detector.histograms[r, c].visualise_get_points_echo_detection,
+                            pulse_width_m
+                        )
+                continue
+
+            parts = user_input.split()
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                print("Invalid input. Please enter two integers (row col), 'all', or 'q' to quit.")
+                continue
+
+            r, c = map(int, parts)
+            if not (0 <= r < rows and 0 <= c < cols):
+                print(f"Indices out of range. Must be within 0–{rows - 1} and 0–{cols - 1}.")
+                continue
+
+            print(f"Launching visualization for cell ({r}, {c})...")
+            Plotter.new_process(
+                self.detector.histograms[r, c].visualise_get_points_echo_detection,
+                pulse_width_m
+            )
 
     def init_kl_test(self):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
