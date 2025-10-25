@@ -71,14 +71,18 @@ class Plotter:
         plt.show()
 
     @staticmethod
-    def plot_points(hists, rows, cols, pulse_width_m):
+    def plot_points(hists, rows, cols, pulse_width_m, detector):
         # use browser renderer to avoid terminal output
         pio.renderers.default = "browser"
 
         xs, ys, zs = [], [], []
         for yy in range(rows):
             for xx in range(cols):
-                pts = hists[yy][xx].get_points_echo_detection(pulse_width_m)
+                theta_x = (detector.fov_x_rad / detector.zone_cols) * (
+                            xx + 0.5 - (detector.zone_cols / 2))
+                theta_y = (detector.fov_y_rad / detector.zone_rows) * (
+                            yy + 0.5 - (detector.zone_rows / 2))
+                pts = hists[yy][xx].get_points_echo_detection(pulse_width_m, theta_x, theta_y)
                 if pts is None or len(pts) == 0:
                     continue
                 for p in pts:

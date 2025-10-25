@@ -62,16 +62,17 @@ class Histogram:
         return np.array(maxima)
 
     # find fwhm
-    def find_fwhm(self, data: np.ndarray, maxima: np.ndarray):
+    def find_fwhm(self, data: np.ndarray, maxima: np.ndarray, threshold = 0.50, sp_threshold = 0.98):
         N = self.bin_count
         fwhm = []
         p_left = []
         p_right = []
+        single_points = []
         for maximum in maxima:
-            # Compute indices of points that pass 50% threshold
+            # Compute indices of points that pass threshold (default 50%)
             i_left = int(np.floor(maximum))
             i_right = int(np.ceil(maximum))
-            half_maximum_val = 0.5 * self.lerp(data[i_left], data[i_right], maximum - i_left)
+            half_maximum_val = threshold * self.lerp(data[i_left], data[i_right], maximum - i_left)
 
             while i_left >= 0 and data[i_left] >= half_maximum_val:
                 i_left -= 1
@@ -122,15 +123,44 @@ class Histogram:
             p_left.append(x_left)
             p_right.append(x_right)
 
-        return np.array(fwhm), np.array(p_left), np.array(p_right)
+        for maximum in maxima:
+            # Compute indices of points that pass sp_threshold (default 95%)
+            i_left = int(np.floor(maximum))
+            i_right = int(np.ceil(maximum))
+            half_maximum_val = sp_threshold * self.lerp(data[i_left], data[i_right], maximum - i_left)
 
-    def compute_points(self, pulse_width_m, maxima, fwhm, fwhm_left, fwhm_right):
+            while i_left >= 0 and data[i_left] >= half_maximum_val:
+                i_left -= 1
+
+            # Compute left side crossing
+            if i_left < 0:
+                # TODO: estimate based on derivatives
+                # Half-maximum lies before index 0 -> extrapolate using (0,1)
+                # if N >= 2 and data[1] != data[0]:
+                #     x_left = 0.0 + (half_maximum_val - data[0]) / (data[1] - data[0])
+                # else:
+                #    x_left = 0.0  # degenerate fallback
+                x_left = 0.0
+            else:
+                # Crossing is between i_left and i_left+1
+                j0, j1 = i_left, i_left + 1
+                y0, y1 = data[j0], data[j1]
+                if y1 != y0:
+                    x_left = j0 + (half_maximum_val - y0) / (y1 - y0)
+                else:
+                    x_left = j0 + 0.5  # flat segment fallback
+
+            single_points.append(x_left)
+
+        return np.array(fwhm), np.array(p_left), np.array(p_right), np.array(single_points)
+
+    def compute_points(self, pulse_width_m, maxima, fwhm, fwhm_left, fwhm_right, single_points):
         points = []
         pulse_width_bins = pulse_width_m / self.bin_width_m
         for i in range(len(maxima)):
             if fwhm[i] > pulse_width_bins/4:
                 if fwhm[i] < pulse_width_bins*1.5:
-                    points.append(maxima[i])
+                    points.append(single_points[i])
                 else:
                     mid = (fwhm_right[i] + fwhm_left[i]) / 2.0
                     p_left = mid - pulse_width_bins/2.0
@@ -140,7 +170,7 @@ class Histogram:
         return np.array(points)
 
 
-    def get_points_echo_detection(self, pulse_width_m):
+    def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)
@@ -150,9 +180,21 @@ class Histogram:
         deriv = self.compute_derivative()
         dderiv = self.compute_second_derivative()
         maxima = self.find_local_maxima(data, deriv, dderiv)
-        fwhm, p_left, p_right = self.find_fwhm(data, maxima)
-        points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right)
-        return points * self.bin_width_m
+        fwhm, p_left, p_right, single_points = self.find_fwhm(data, maxima)
+        points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right, single_points)
+        correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        return points * self.bin_width_m * correction + offset
+
+    @staticmethod
+    def compute_depth(points, filtered=True):
+        points = np.array(points)
+        if filtered:
+            lower, upper = np.percentile(points, [5, 95])
+            filtered_points = points[(points >= lower) & (points <= upper)]
+            return filtered_points.max() - filtered_points.min()
+        else:
+            return points.max() - points.min()
+
 
     def visualise_get_points_echo_detection(self, pulse_width_m):
         data = np.asarray(self.data, dtype=float).copy()
@@ -163,8 +205,8 @@ class Histogram:
         deriv = self.compute_derivative()
         dderiv = self.compute_second_derivative()
         maxima = self.find_local_maxima(data, deriv, dderiv)
-        fwhm, p_left, p_right = self.find_fwhm(data, maxima)
-        points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right)
+        fwhm, p_left, p_right, single_points = self.find_fwhm(data, maxima)
+        points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right, single_points)
         # TODO: visualisation with matplotlib
         # a) plot histogram with fwhm, p_left, p_right, maxima, and points marked
         # b) plot derivative (separate plot under)

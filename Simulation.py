@@ -88,14 +88,19 @@ class Simulation:
         points = []
         for r in range(self.detector.zone_rows):
             for c in range(self.detector.zone_cols):
-                pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m)
+                theta_x = (self.detector.fov_x_rad / self.detector.zone_cols) * (
+                            c + 0.5 - (self.detector.zone_cols / 2))
+                theta_y = (self.detector.fov_y_rad / self.detector.zone_rows) * (
+                            r + 0.5 - (self.detector.zone_rows / 2))
+                pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m, theta_x = theta_x, theta_y = theta_y)
                 if pts is not None and len(pts) > 0:
                     points.extend(pts)
         points = np.array(points, dtype=float)
         points = points[points > 0]
-        print(f"depth = {np.max(points) - np.min(points)}")
+        print(f"depth = {Histogram.compute_depth(points, filtered=False)}")
+        print(f"depth filtered = {Histogram.compute_depth(points, filtered=True)}")
         # SHOW POINTS
-        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m)
+        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m, self.detector)
         # SHOW HISTOGRAM PROCESSING
         self.select_and_visualize()
 
@@ -286,8 +291,12 @@ class Simulation:
             h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
             h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
 
-            exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
-            sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
+            theta_x = (self.detectors[0].fov_x_rad / self.detectors[0].zone_cols) * (
+                    C_SEL + 0.5 - (self.detectors[0].zone_cols / 2))
+            theta_y = (self.detectors[0].fov_y_rad / self.detectors[0].zone_rows) * (
+                    R_SEL + 0.5 - (self.detectors[0].zone_rows / 2))
+            exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m, theta_x, theta_y)
+            sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m, theta_x, theta_y)
 
             # draw vertical lines at detected points
             for k, x in enumerate(exp_pts_m):
@@ -361,13 +370,21 @@ class Simulation:
                 h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
                 exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
                 sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
-                sim_max = max(sim_max, sim_pts_m.max())
-                sim_min = min(sim_min, sim_pts_m.min())
-                exp_max = max(exp_max, exp_pts_m.max())
-                exp_min = min(exp_min, exp_pts_m.min())
+                if len(sim_pts_m) > 0:
+                    sim_max = max(sim_max, sim_pts_m.max())
+                    sim_min = min(sim_min, sim_pts_m.min())
+                if len(exp_pts_m) > 0:
+                    exp_max = max(exp_max, exp_pts_m.max())
+                    exp_min = min(exp_min, exp_pts_m.min())
 
-            sim_depths.append((sim_max - sim_min) * 1000)
-            exp_depths.append((exp_max - exp_min) * 1000)
+            if sim_max > (-1.0 * 10e10) and sim_min < (1.0 * 10e10):
+                sim_depths.append((sim_max - sim_min) * 1000)
+            else:
+                sim_depths.append(-1)
+            if exp_max > (-1.0 * 10e10) and exp_min < (1.0 * 10e10):
+                exp_depths.append((exp_max - exp_min) * 1000)
+            else:
+                exp_depths.append(-1)
 
         test_distances = np.arange(100, 201, 10)
 

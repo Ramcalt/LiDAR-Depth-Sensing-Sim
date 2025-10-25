@@ -75,16 +75,16 @@ class RayTracer:
 
         # Mask outside FOV
         in_fov = (
-                (np.abs(theta_x) <= detector.fov_x_rad) &
-                (np.abs(theta_y) <= detector.fov_y_rad)
+                (np.abs(theta_x) <= detector.fov_x_rad/2.0) &
+                (np.abs(theta_y) <= detector.fov_y_rad/2.0)
         )
         theta_x = theta_x[in_fov]
         theta_y = theta_y[in_fov]
         los_dists = los_dists[in_fov]
 
         # Map angles to [0, 1)
-        tx = (theta_x + detector.fov_x_rad) / (2.0 * detector.fov_x_rad)
-        ty = (theta_y + detector.fov_y_rad) / (2.0 * detector.fov_y_rad)
+        tx = (theta_x + detector.fov_x_rad/2.0) / (detector.fov_x_rad)
+        ty = (theta_y + detector.fov_y_rad/2.0) / (detector.fov_y_rad)
         sx = np.clip(tx, 0.0, 1.0 - np.finfo(float).eps)
         sy = np.clip(ty, 0.0, 1.0 - np.finfo(float).eps)
 
