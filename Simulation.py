@@ -119,9 +119,7 @@ class Simulation:
                 for r in range(rows):
                     for c in range(cols):
                         Plotter.new_process(
-                            self.detector.histograms[r, c].visualise_get_points_echo_detection,
-                            pulse_width_m
-                        )
+                            self.detector.histograms[r, c].visualise_get_points_echo_detection,pulse_width_m)
                 continue
 
             parts = user_input.split()
@@ -136,9 +134,7 @@ class Simulation:
 
             print(f"Launching visualization for cell ({r}, {c})...")
             Plotter.new_process(
-                self.detector.histograms[r, c].visualise_get_points_echo_detection,
-                pulse_width_m
-            )
+                self.detector.histograms[r, c].visualise_get_points_echo_detection,pulse_width_m)
 
     def init_kl_test(self):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
@@ -168,7 +164,7 @@ class Simulation:
                           ]
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/flat_W105.stl",
+                        "res/square_W105_D25.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
@@ -290,8 +286,8 @@ class Simulation:
             h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
             h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
 
-            exp_pts_m = h_exp.get_points_echo_detection()
-            sim_pts_m = h_sim.get_points_echo_detection()
+            exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
+            sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
 
             # draw vertical lines at detected points
             for k, x in enumerate(exp_pts_m):
@@ -349,9 +345,50 @@ class Simulation:
         plt.tight_layout()
         plt.show()
 
+        ##### DEPTH ######
+        # # # PLOT SIM VS REAL # # #
+        sim_depths = []
+        exp_depths = []
+        true_depth = 25
+        for idx, mm in enumerate(range(100, 201, 10)):
+            sim_max = exp_max = -1.0 * 10e10
+            sim_min = exp_min = 1.0 * 10e10
+            for r, c in zip(range(4), range(4)):
+                dict_name = f"{mm}mm"
+                sim_raw = simresults[dict_name][r, c].copy()  # shape (32,)
+                exp_raw = results[dict_name][r, c].copy()  # shape (32,)
+                h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
+                h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
+                exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
+                sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
+                sim_max = max(sim_max, sim_pts_m.max())
+                sim_min = min(sim_min, sim_pts_m.min())
+                exp_max = max(exp_max, exp_pts_m.max())
+                exp_min = min(exp_min, exp_pts_m.min())
 
-# sim = Simulation()
-# sim.run_kl_test()
+            sim_depths.append((sim_max - sim_min) * 1000)
+            exp_depths.append((exp_max - exp_min) * 1000)
+
+        test_distances = np.arange(100, 201, 10)
+
+        # # # PLOT # # #
+        plt.figure(figsize=(8, 5))
+        plt.plot(test_distances, exp_depths, 'o-', label='Experimental Depth')
+        plt.plot(test_distances, sim_depths, 's--', label='Simulated Depth')
+        plt.axhline(y=true_depth, color='r', linestyle=':', linewidth=2, label='Ground Truth')
+
+        plt.title("Depth Comparison: Experimental vs Simulation vs Ground Truth")
+        plt.xlabel("Test Distance (mm)")
+        plt.ylabel("Depth (mm)")
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
 sim = Simulation()
-sim.view_scene_trimesh()
-sim.run()
+sim.run_kl_test()
+# sim = Simulation()
+# sim.view_scene_trimesh()
+# sim.run()
+
