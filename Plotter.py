@@ -71,7 +71,7 @@ class Plotter:
         plt.show()
 
     @staticmethod
-    def plot_points(hists, rows, cols, pulse_width_m, detector):
+    def plot_points(algo, hists, rows, cols, pulse_width_m, detector):
         # use browser renderer to avoid terminal output
         pio.renderers.default = "browser"
 
@@ -82,7 +82,13 @@ class Plotter:
                             xx + 0.5 - (detector.zone_cols / 2))
                 theta_y = (detector.fov_y_rad / detector.zone_rows) * (
                             yy + 0.5 - (detector.zone_rows / 2))
-                pts = hists[yy][xx].get_points_echo_detection(pulse_width_m, theta_x, theta_y)
+                if algo == "echo":
+                    pts = hists[yy][xx].get_points_echo_detection(pulse_width_m, theta_x, theta_y)
+                elif algo == "deconv":
+                    pts = hists[yy][xx].get_points_deconv(theta_x, theta_y)
+                else:
+                    pts = hists[yy][xx].get_points_wav_decomp(pulse_width_m)
+
                 if pts is None or len(pts) == 0:
                     continue
                 for p in pts:

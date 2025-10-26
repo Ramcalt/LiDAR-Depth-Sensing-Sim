@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 
 class Histogram:
@@ -21,12 +22,11 @@ class Histogram:
         self.bin_width_m = bin_width_m
         self.time_end = float(time_end) if time_end else (self.time_start + self.bin_count * self.bin_width_m)
 
+    # - - - - - - - - - - UTIL - - - - - - - - - - #
     # central difference
-    def compute_derivative(self):
-        data = self.data
-        N = self.bin_count
+    def compute_derivative(self, data: np.ndarray) -> np.ndarray:
+        N = len(data)
         deriv = np.zeros_like(data)
-
         deriv[0] = data[1] - data[0] # fwd diff for first point
         deriv[-1] = data[-1] - data[-2] # bwd diff for last point
         for i in range(1, N-1): # central diff for interior points
@@ -34,11 +34,9 @@ class Histogram:
         return deriv
 
     # second order central difference
-    def compute_second_derivative(self):
-        data = self.data
-        N = self.bin_count
+    def compute_second_derivative(self, data: np.ndarray) -> np.ndarray:
+        N = len(data)
         dderiv = np.zeros_like(data)
-
         dderiv[0] = data[2] - 2 * data[1] + data[0]
         dderiv[-1] = data[-1] - 2 * data[-2] + data[-3]
         for i in range(1, N-1):
@@ -50,17 +48,18 @@ class Histogram:
         return (1 - t) * v0 + t * v1
 
     # find zero crossings of deriv
-    def find_local_maxima(self, data: np.ndarray, deriv: np.ndarray, dderiv: np.ndarray):
-        N = self.bin_count
+    def find_local_maxima(self, data: np.ndarray, deriv: np.ndarray, dderiv: np.ndarray, min_amp = 0.5):
+        N = len(data)
         maxima = []
         for i in range(1, N-1):
             if deriv[i - 1] > 0.0 >= deriv[i]: # ensure zero crossing # and (dderiv[i-1] < 0.0 or dderiv[i] < 0.0):
                 t = deriv[i-1] / (deriv[i-1] - deriv[i])
                 if self.lerp(dderiv[i-1], dderiv[i], t) < 0.0: # ensure concave down
-                    if self.lerp(data[i - 1], data[i], t) > 0.5: # minimum prominence
+                    if self.lerp(data[i - 1], data[i], t) > min_amp: # minimum prominence
                         maxima.append((i-1) + t)
         return np.array(maxima)
 
+    # - - - - - - - - - - ECHO DETECTION - - - - - - - - - - #
     # find fwhm
     def find_fwhm(self, data: np.ndarray, maxima: np.ndarray, threshold = 0.50, sp_threshold = 0.98):
         N = self.bin_count
@@ -169,7 +168,6 @@ class Histogram:
                     points.append(maxima[i] + (fwhm_right[i] - p_right))
         return np.array(points)
 
-
     def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
@@ -177,14 +175,16 @@ class Histogram:
         if data.size < 3:
             return []
 
-        deriv = self.compute_derivative()
-        dderiv = self.compute_second_derivative()
+        deriv = self.compute_derivative(data)
+        dderiv = self.compute_second_derivative(data)
         maxima = self.find_local_maxima(data, deriv, dderiv)
         fwhm, p_left, p_right, single_points = self.find_fwhm(data, maxima)
         points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right, single_points)
-        correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        # correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        correction = 1
         return points * self.bin_width_m * correction + offset
 
+    # - - - - - - - - - - DEPTH - - - - - - - - - - #
     @staticmethod
     def compute_depth(points, filtered=True):
         points = np.array(points)
@@ -195,6 +195,251 @@ class Histogram:
         else:
             return points.max() - points.min()
 
+    # - - - - - - - - - - DECONVOLUTION - - - - - - - - - - #
+    @staticmethod
+    def wiener_deconv(signal, kernel, regularization=1):
+        # Ensure kernel is centered and same length as signal
+        kernel = np.asarray(kernel, dtype=float)
+        signal = np.asarray(signal, dtype=float)
+        N = len(signal)
+
+        # Pad or truncate kernel to match signal length
+        if len(kernel) < N:
+            pad = (N - len(kernel)) // 2
+            kernel = np.pad(kernel, (pad, N - len(kernel) - pad))
+        elif len(kernel) > N:
+            kernel = kernel[:N]
+
+        # Optionally center the kernel (use fftshift if needed)
+        kernel = np.fft.ifftshift(kernel)
+
+        # FFT-based Wiener deconvolution
+        signal_f = np.fft.rfft(signal)
+        kernel_f = np.fft.rfft(kernel)
+        deconv_f = (signal_f * np.conj(kernel_f)) / (np.abs(kernel_f) ** 2 + regularization)
+        deconv = np.fft.irfft(deconv_f, N)
+
+        return deconv
+
+    def get_points_deconv(self, theta_x=0, theta_y =0, offset=0):
+        data = np.asarray(self.data, dtype=float).copy()
+        if np.max(data) > 0:
+            data /= np.max(data)
+        if data.size < 3:
+            return []
+        # KERNEL IS HISTOGRAM [0, 2] FROM SIM.RUN_FIND_KERNEL
+        kernel = np.array([0.005,0.016,0.066,0.211,0.519,0.882,1.000,0.873,0.556,0.243,0.079,0.018,0.003])
+        deconv = self.wiener_deconv(data, kernel/np.sum(kernel))
+        deconv /= np.max(deconv)
+        deriv = self.compute_derivative(deconv)
+        dderiv = self.compute_second_derivative(deconv)
+        maxima = self.find_local_maxima(deconv, deriv, dderiv)
+        # correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        correction = 1
+        return maxima * self.bin_width_m * correction + offset
+
+    # - - - - - - - - - - WAVFORM DECOMPOSITION - - - - - - - - - - #
+    def get_decomp_estimate_maxima(self, data):
+        deriv = self.compute_derivative(data)
+        dderiv = self.compute_second_derivative(data)
+        maxima = self.find_local_maxima(data, deriv, dderiv, min_amp=0.1)
+        if len(maxima) <= 0:
+            A1 = np.argmax(data)
+            mu1 = np.argmax(data) * self.bin_width_m
+            initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
+        elif len(maxima) == 1:
+            max1_left = np.floor(maxima[0])
+            max1_right = np.ceil(maxima[0])
+            A1 = self.lerp(data[int(max1_left)], data[int(max1_right)], maxima[0] - max1_left)
+            mu1 = maxima[0] * self.bin_width_m
+            initial_guess = [A1, mu1, 0, 0]
+        else:
+            amps = [np.interp(m, np.arange(len(data)), data) for m in maxima]
+            maxima = list(zip(maxima, amps))
+            maxima_sorted = sorted(maxima, key=lambda m: m[1], reverse=True)
+            max1_left = np.floor(maxima_sorted[0][0])
+            max1_right = np.ceil(maxima_sorted[0][0])
+            max2_left = np.floor(maxima_sorted[1][0])
+            max2_right = np.ceil(maxima_sorted[1][0])
+            A1 = self.lerp(data[int(max1_left)], data[int(max1_right)], maxima_sorted[0][0] - max1_left)
+            A2 = self.lerp(data[int(max2_left)], data[int(max2_right)], maxima_sorted[1][0] - max2_left)
+            mu1 = maxima_sorted[0][0] * self.bin_width_m
+            mu2 = maxima_sorted[1][0] * self.bin_width_m
+            initial_guess = [A1, mu1, A2, mu2]
+        return initial_guess
+
+    def get_decomp_estimate_deconv(self, data):
+        estimated_points = self.get_points_deconv()
+        if len(estimated_points) <= 0:
+            A1 = np.argmax(data)
+            mu1 = np.argmax(data) * self.bin_width_m + self.time_start
+            initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
+        elif len(estimated_points) == 1:
+            initial_guess = [1, estimated_points[0], 0, 0]
+        else:
+            initial_guess = [0.5, estimated_points[0], 0.5, estimated_points[1]]
+        return initial_guess
+
+    def get_points_wav_decomp(self, pulse_width_m):
+        data = np.asarray(self.data, dtype=float).copy()
+        if np.max(data) > 0:
+            data /= np.max(data)
+        if data.size < 3:
+            return []
+
+        # setup model and estimate
+        N = len(data)
+        x_m = np.arange(N) * self.bin_width_m
+        initial_guess = self.get_decomp_estimate_maxima(data)
+
+        sigma = pulse_width_m / 2.355
+        def model(x, A1, mu1, A2, mu2):
+            return (
+                A1 * np.exp(-0.5 * ((x - mu1) / sigma) ** 2) +
+                A2 * np.exp(-0.5 * ((x - mu2) / sigma) ** 2)
+            )
+
+        # curve fit
+        try:
+            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, maxfev=5000)
+        except RuntimeError:
+            return np.array([])
+
+        # Quick amplitude based filtering
+        A1, mu1, A2, mu2 = popt
+        peaks = []
+        if A1 > 0.25 and mu1 > 0:
+            peaks.append(mu1)
+        if A2 > 0.25 and mu2 > 0:
+            peaks.append(mu2)
+
+        return np.array(sorted(peaks))
+
+
+    # ========================== VISUALISATION ======================= #
+    def visualise_get_points_wav_decomp(self, pulse_width_m):
+        """Visualise the result of the waveform decomposition method."""
+        data = np.asarray(self.data, dtype=float).copy()
+        if np.max(data) > 0:
+            data /= np.max(data)
+        if data.size < 3:
+            return []
+
+        # setup model
+        N = data.size
+        x_m = np.arange(N) * self.bin_width_m
+        sigma = pulse_width_m / 2.355
+        initial_guess = self.get_decomp_estimate_maxima(data)
+        def model(x, A1, mu1, A2, mu2):
+            return (
+                    A1 * np.exp(-0.5 * ((x - mu1) / sigma) ** 2) +
+                    A2 * np.exp(-0.5 * ((x - mu2) / sigma) ** 2)
+            )
+
+        # curve fit
+        try:
+            popt, _ = curve_fit(model, x_m, data, p0=initial_guess, maxfev=5000)
+        except RuntimeError:
+            print("Curve fitting failed — plotting raw histogram only.")
+            plt.figure(figsize=(10, 4))
+            plt.plot(x_m, data, label="Histogram (normalised)")
+            plt.xlabel("Range (m)")
+            plt.ylabel("Amplitude")
+            plt.title("Waveform Decomposition (fit failed)")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.show()
+            return
+
+        A1, mu1, A2, mu2 = popt
+        fit = model(x_m, *popt)
+        comp1 = A1 * np.exp(-0.5 * ((x_m - mu1) / sigma) ** 2)
+        comp2 = A2 * np.exp(-0.5 * ((x_m - mu2) / sigma) ** 2)
+
+        # Plot
+        fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+        ax.plot(x_m, data, 'k-', label="Measured waveform")
+        ax.plot(x_m, fit, 'r-', label="Fitted sum (2-Gaussian)")
+        ax.plot(x_m, comp1, 'b--', label=f"Component 1 (μ={mu1:.3f} m)")
+        ax.plot(x_m, comp2, 'g--', label=f"Component 2 (μ={mu2:.3f} m)")
+
+        # Mark peak centers
+        ax.axvline(mu1, color='b', linestyle=':', alpha=0.6)
+        ax.axvline(mu2, color='g', linestyle=':', alpha=0.6)
+        ax.set_xlabel("Range (m)")
+        ax.set_ylabel("Amplitude (norm.)")
+        ax.set_title("Waveform Decomposition — Two Fixed-Width Gaussians")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+
+    def visualise_get_points_deconv(self, pulse_width_m):
+        data = np.asarray(self.data, dtype=float).copy()
+        if np.max(data) > 0:
+            data /= np.max(data)
+        if data.size < 3:
+            return []
+        kernel = np.array([0.005,0.016,0.066,0.211,0.519,0.882,1.000,0.873,0.556,0.243,0.079,0.018,0.003])
+        deconv = self.wiener_deconv(data, kernel/np.sum(kernel))
+        deconv /= np.max(deconv)
+        deriv = self.compute_derivative(deconv)
+        dderiv = self.compute_second_derivative(deconv)
+        maxima = self.find_local_maxima(deconv, deriv, dderiv)
+        points = maxima * self.bin_width_m
+        # TODO visualise_get_points_deconv plot
+        # TODO: visualisation with matplotlib
+        # a) plot histogram and the deconvolved histogram and the detected maxima
+        # b) plot deconvolved derivative (separate plot under)
+        # c) plot deconvolved dderivative (separate plot under)
+        # X-axis in meters (offset by time_start which is in meters here)
+        # Convert x-axis to physical distance (meters)
+        # X-axis in meters
+        N = data.size
+        x_bins = np.arange(N, dtype=float)
+        x_m = self.time_start + x_bins * self.bin_width_m
+        maxima_m = self.time_start + np.asarray(maxima) * self.bin_width_m if maxima.size else np.array([])
+
+        # === PLOTS ===
+        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(10, 8))
+        ax_h, ax_d1, ax_d2 = axs
+
+        # (a) Original + Deconvolved histograms
+        ax_h.plot(x_m, data, label="Original Histogram", alpha=0.6)
+        ax_h.plot(x_m, deconv, label="Deconvolved Signal", linewidth=1.2)
+        ax_h.set_ylabel("Amplitude (norm.)")
+        ax_h.set_title("Deconvolution-Based Peak Detection")
+
+        # Mark detected maxima
+        if maxima_m.size:
+            ax_h.scatter(maxima_m, np.interp(maxima_m, x_m, deconv),
+                         color="red", marker="x", s=60, label="Detected Maxima")
+
+            # Optional pulse width visualization band
+            pw = float(pulse_width_m)
+            for xm in maxima_m:
+                ax_h.axvspan(xm - 0.5 * pw, xm + 0.5 * pw, alpha=0.05, color="gray")
+
+        ax_h.grid(True, alpha=0.3)
+        ax_h.legend(loc="upper right")
+
+        # (b) First derivative
+        ax_d1.plot(x_m, deriv, label="First Derivative", color="tab:orange")
+        ax_d1.set_ylabel("d/dx (shape)")
+        ax_d1.grid(True, alpha=0.3)
+        ax_d1.legend(loc="upper right")
+
+        # (c) Second derivative
+        ax_d2.plot(x_m, dderiv, label="Second Derivative", color="tab:green")
+        ax_d2.set_ylabel("d^2/dx^2 (shape)")
+        ax_d2.set_xlabel("Range (m)")
+        ax_d2.grid(True, alpha=0.3)
+        ax_d2.legend(loc="upper right")
+
+        plt.tight_layout()
+        plt.show()
+
 
     def visualise_get_points_echo_detection(self, pulse_width_m):
         data = np.asarray(self.data, dtype=float).copy()
@@ -202,16 +447,11 @@ class Histogram:
             data /= np.max(data)
         if data.size < 3:
             return []
-        deriv = self.compute_derivative()
-        dderiv = self.compute_second_derivative()
+        deriv = self.compute_derivative(data)
+        dderiv = self.compute_second_derivative(data)
         maxima = self.find_local_maxima(data, deriv, dderiv)
         fwhm, p_left, p_right, single_points = self.find_fwhm(data, maxima)
         points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right, single_points)
-        # TODO: visualisation with matplotlib
-        # a) plot histogram with fwhm, p_left, p_right, maxima, and points marked
-        # b) plot derivative (separate plot under)
-        # c) plot dderivative (separate plot under)
-        # X-axis in meters (offset by time_start which is in meters here)
         N = data.size
         x_bins = np.arange(N, dtype=float)
         x_m = self.time_start + x_bins * self.bin_width_m
@@ -289,18 +529,6 @@ class Histogram:
         plt.tight_layout()
         plt.show()
 
-        # Return figure in case the caller wants to save or further modify it
-        return fig, axs
-
-    def get_points_wav_decomp(self):
-        return 1.0
-
-    def get_points_deconv(self):
-        return 1.0
-
-    def get_points_ai_model(self):
-        return 1.0
-
 
 # =========================
 # Example usage (synthetic)
@@ -323,3 +551,5 @@ if __name__ == "__main__":
     h = Histogram(time_start=0.0, time_end=None, bin_count=N, bin_width_m=bin_width_m, data=y)
     print(h.get_points_echo_detection(0.15))
     h.visualise_get_points_echo_detection(0.15)
+    h.visualise_get_points_deconv(0.15)
+    h.visualise_get_points_wav_decomp(0.15)

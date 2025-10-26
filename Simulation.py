@@ -18,6 +18,29 @@ from scipy.special import rel_entr
 import matplotlib.pyplot as plt
 from lidar.Histogram import Histogram
 
+vl53l8ch_emitter = Emitter("emitter",
+                       "res/sensor_toscale.stl",
+                       Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
+                       HTransform().translation(-0.002, 0, 0),
+                       940e-9,
+                       7.7e-8 * (10 ** (0.002 * (940 - 700))),  # 200 * 0.74e-3 * 0.90e-3,
+                       0.5e-9,
+                       1.010546,  # 57.9deg for 10% signal from max
+                       1.010546,
+                       4
+                       )
+vl53l8ch_detector = Detector("detector",
+                         "res/sensor_toscale.stl",
+                         Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
+                         HTransform().translation(0.002, 0, 0),
+                         8,
+                         8,
+                         0.79,
+                         0.79,
+                         32,
+                         0.0375
+                         )
+
 class Simulation:
     """Singleton for managing simulation."""
     scene: Scene
@@ -25,48 +48,53 @@ class Simulation:
     detector: Detector
 
     def __init__(self):
+        pass
+
+    def test_plotting(self):
+        self.detector.fill_hist_with_noise()
+        self.view_plots()
+
+    def run_find_kerenel(self):
         """Initialise scene and add emitter, detector, and scene objects"""
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
-        self.emitter = Emitter("emitter",
-                               "res/sensor_toscale.stl",
-                               Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
-                               HTransform().translation(-0.002, 0, 0),
-                               940e-9,
-                               7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
-                               0.5e-9,
-                               1.010546, # 57.9deg for 10% signal from max
-                               1.010546,
-                               4
-                               )
-        self.detector = Detector("detector",
-                                 "res/sensor_toscale.stl",
-                                 Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
-                                 HTransform().translation(0.002, 0, 0),
-                                 8,
-                                 8,
-                                 0.79,
-                                 0.79,
-                                 100,
-                                 0.0375
-                                 )
+        self.emitter = vl53l8ch_emitter
+        self.detector = vl53l8ch_detector
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/flat_W105.stl",
+                        "res/flat_W105000.stl",
+                        Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
+                        HTransform().translation(0,0, +0.3) @ HTransform().rotation_x(np.pi)
+                        )
+        )
+        self.scene.add_obj(self.detector)
+        self.scene.add_obj(self.emitter)
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 1_000_000)
+        for r in range(8):
+            for c in range (8):
+                print(f"Histogram[{r}, {c}] = [{','.join(map(lambda x: f'{x:.3f}', self.detector.histograms[r, c].data))}]")
+
+        self.view_plots()
+
+    def run(self):
+        """Run the simulation"""
+        """Initialise scene and add emitter, detector, and scene objects"""
+        self.scene = Scene(1.0, [1.0, 1.0, 1.0])
+        self.emitter = vl53l8ch_emitter
+        self.detector = vl53l8ch_detector
+        self.scene.add_obj(
+            SceneObject("cavity",
+                        "res/cavity_H24_D30.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
         )
         self.scene.add_obj(self.detector)
         self.scene.add_obj(self.emitter)
-
-    def test_plotting(self):
-        self.detector.fill_hist_with_noise()
-        self.view_plots()
-
-    def run(self):
-        """Run the simulation"""
-        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 100_000)
-        self.view_plots()
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 500_000)
+        self.view_histograms()
+        self.view_plots(algo="echo")
+        self.view_plots(algo="deconv")
+        self.view_plots(algo="decomp")
 
     def view_scene(self):
         """View the scene using Open3D"""
@@ -80,10 +108,12 @@ class Simulation:
         [scene.add_geometry(mesh) for mesh in meshes]
         scene.show()
 
-    def view_plots(self):
+    def view_histograms(self):
+        Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows,
+                            self.detector.zone_cols)
+
+    def view_plots(self, algo="echo"):
         """Runs matplotlib plots in separate processes"""
-        # PLOT HISTOGRAMS
-        Plotter.new_process(Plotter.plot_hist_arr, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols)
         # COMPUTE DEPTH
         points = []
         for r in range(self.detector.zone_rows):
@@ -92,7 +122,12 @@ class Simulation:
                             c + 0.5 - (self.detector.zone_cols / 2))
                 theta_y = (self.detector.fov_y_rad / self.detector.zone_rows) * (
                             r + 0.5 - (self.detector.zone_rows / 2))
-                pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m, theta_x = theta_x, theta_y = theta_y)
+                if algo == "echo":
+                    pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m, theta_x = theta_x, theta_y = theta_y)
+                elif algo == "deconv":
+                    pts = self.detector.histograms[r, c].get_points_deconv(theta_x=theta_x, theta_y=theta_y)
+                else:
+                    pts = self.detector.histograms[r, c].get_points_wav_decomp(self.emitter.pulse_length_m)
                 if pts is not None and len(pts) > 0:
                     points.extend(pts)
         points = np.array(points, dtype=float)
@@ -100,11 +135,11 @@ class Simulation:
         print(f"depth = {Histogram.compute_depth(points, filtered=False)}")
         print(f"depth filtered = {Histogram.compute_depth(points, filtered=True)}")
         # SHOW POINTS
-        Plotter.plot_points(self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m, self.detector)
+        Plotter.plot_points(algo, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m, self.detector)
         # SHOW HISTOGRAM PROCESSING
-        self.select_and_visualize()
+        self.select_and_visualize(algo)
 
-    def select_and_visualize(self):
+    def select_and_visualize(self, algo):
         """Allow user to select which histogram cell(s) to visualize via terminal input."""
         rows = self.detector.zone_rows
         cols = self.detector.zone_cols
@@ -123,8 +158,12 @@ class Simulation:
             if user_input == "all":
                 for r in range(rows):
                     for c in range(cols):
-                        Plotter.new_process(
-                            self.detector.histograms[r, c].visualise_get_points_echo_detection,pulse_width_m)
+                        if algo == "echo":
+                            Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_echo_detection,pulse_width_m)
+                        elif algo == "deconv":
+                            Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_deconv,pulse_width_m)
+                        else:
+                            Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_wav_decomp,pulse_width_m)
                 continue
 
             parts = user_input.split()
@@ -138,22 +177,16 @@ class Simulation:
                 continue
 
             print(f"Launching visualization for cell ({r}, {c})...")
-            Plotter.new_process(
-                self.detector.histograms[r, c].visualise_get_points_echo_detection,pulse_width_m)
+            if algo == "echo":
+                Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_echo_detection, pulse_width_m)
+            elif algo == "deconv":
+                Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_deconv, pulse_width_m)
+            else:
+                Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_wav_decomp, pulse_width_m)
 
     def init_kl_test(self):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
-        self.emitter = Emitter("emitter",
-                               "res/sensor_toscale.stl",
-                               Material(1.0, 1.0, 1.0, [0.8, 0.2, 0.2]),
-                               HTransform().translation(-0.002, 0, 0),
-                               940e-9,
-                               7.7e-8 * (10**(0.002*(940-700))), # 200 * 0.74e-3 * 0.90e-3,
-                               0.5e-9,
-                               1.010546, # 57.9deg for 10% signal from max
-                               1.010546,
-                               4
-                               )
+        self.emitter = vl53l8ch_emitter
         self.detectors = [Detector(f"detector{i}",
                                  "res/sensor_toscale.stl",
                                  Material(1.0, 1.0, 1.0, [0.2, 0.2, 0.8]),
@@ -189,7 +222,7 @@ class Simulation:
             det = self.detectors[i]
             self.scene.add_obj(det)
             target.transform = HTransform().translation(0, 0, z_offset) @ HTransform().rotation_x(np.pi)
-            RayTracer.run_trimesh(self.scene, target, self.emitter, det, 100_000)
+            RayTracer.run_trimesh(self.scene, target, self.emitter, det, 250_000)
 
         # Collect results into dict
         simresults = {}  # dict: {'100mm': np.ndarray(shape=(8,8,32)), ...}
@@ -362,20 +395,21 @@ class Simulation:
         for idx, mm in enumerate(range(100, 201, 10)):
             sim_max = exp_max = -1.0 * 10e10
             sim_min = exp_min = 1.0 * 10e10
-            for r, c in zip(range(4), range(4)):
-                dict_name = f"{mm}mm"
-                sim_raw = simresults[dict_name][r, c].copy()  # shape (32,)
-                exp_raw = results[dict_name][r, c].copy()  # shape (32,)
-                h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
-                h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
-                exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
-                sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
-                if len(sim_pts_m) > 0:
-                    sim_max = max(sim_max, sim_pts_m.max())
-                    sim_min = min(sim_min, sim_pts_m.min())
-                if len(exp_pts_m) > 0:
-                    exp_max = max(exp_max, exp_pts_m.max())
-                    exp_min = min(exp_min, exp_pts_m.min())
+            for r in range(4):
+                for c in range(4):
+                    dict_name = f"{mm}mm"
+                    sim_raw = simresults[dict_name][r, c].copy()  # shape (32,)
+                    exp_raw = results[dict_name][r, c].copy()  # shape (32,)
+                    h_exp = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=exp_raw)
+                    h_sim = Histogram(time_start=0.0, time_end=None, bin_count=32, bin_width_m=BIN_WIDTH_M, data=sim_raw)
+                    exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
+                    sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
+                    if len(sim_pts_m) > 0:
+                        sim_max = max(sim_max, sim_pts_m.max())
+                        sim_min = min(sim_min, sim_pts_m.min())
+                    if len(exp_pts_m) > 0:
+                        exp_max = max(exp_max, exp_pts_m.max())
+                        exp_min = min(exp_min, exp_pts_m.min())
 
             if sim_max > (-1.0 * 10e10) and sim_min < (1.0 * 10e10):
                 sim_depths.append((sim_max - sim_min) * 1000)
@@ -403,9 +437,15 @@ class Simulation:
         plt.show()
 
 
-sim = Simulation()
-sim.run_kl_test()
 # sim = Simulation()
+# sim.run_kl_test()
+
+sim = Simulation()
+sim.run()
+sim.view_scene_trimesh()
+
+# sim = Simulation()
+# sim.run_find_kerenel()
 # sim.view_scene_trimesh()
-# sim.run()
+
 
