@@ -244,8 +244,9 @@ class Histogram:
         dderiv = self.compute_second_derivative(data)
         maxima = self.find_local_maxima(data, deriv, dderiv, min_amp=0.1)
         if len(maxima) <= 0:
-            A1 = np.argmax(data)
-            mu1 = np.argmax(data) * self.bin_width_m
+            idx = int(np.argmax(data))
+            A1 = np.float(data[idx])
+            mu1 = idx * self.bin_width_m
             initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
         elif len(maxima) == 1:
             max1_left = np.floor(maxima[0])
