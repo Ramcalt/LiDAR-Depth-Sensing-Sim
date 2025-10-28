@@ -168,7 +168,7 @@ class Histogram:
                     points.append(maxima[i] + (fwhm_right[i] - p_right))
         return np.array(points)
 
-    def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=0.0375):
+    def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=0):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)

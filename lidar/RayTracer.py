@@ -101,9 +101,16 @@ class RayTracer:
             )
 
         # apply pulse broadening and binning
+        row_idx = row_idx[los_dists > 2 * EPS]
+        col_idx = col_idx[los_dists > 2 * EPS]
+        los_dists = los_dists[los_dists > 2 * EPS]
         one_way_tof = 0.5 * los_dists
         noisy_distances = emitter.apply_vcsel_pulse_broadening(one_way_tof)
-        detector.apply_binning(noisy_distances, row_idx, col_idx)
+        clipped_distances = noisy_distances - emitter.pulse_length_m/4
+        row_idx = row_idx[clipped_distances > 0]
+        col_idx = col_idx[clipped_distances > 0]
+        clipped_distances = clipped_distances[clipped_distances > 0]
+        detector.apply_binning(clipped_distances, row_idx, col_idx)
 
         # = = = = = = = = = = = = = = = = VIZUALISER = = = = = = = = = = = = =
         if (visualise):

@@ -1,3 +1,5 @@
+from scipy.stats import truncnorm
+
 from scene.SceneObject import SceneObject
 import numpy as np
 from scipy.special import gamma
@@ -30,7 +32,11 @@ class Emitter(SceneObject):
     def apply_vcsel_pulse_broadening(self, distances):
         """ Apply a random broadening due to VCSEL pulse shape. """
         sigma = self.pulse_length_m / 2.355 # Convert FWHM to standard devication
-        gaussian_noise = np.random.normal(loc=0.0, scale=sigma, size=distances.shape)
+        mean = self.pulse_length_m / 2
+        # truncated normal with lower bound 0 and upper boudn inf
+        a = (0 - mean) / sigma
+        b = np.inf
+        gaussian_noise = truncnorm.rvs(a, b, loc=mean, scale=sigma, size=distances.shape)
         broadened = distances + gaussian_noise
         return np.clip(broadened, a_min=0.0, a_max=None)
 

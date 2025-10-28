@@ -184,7 +184,7 @@ class Simulation:
             else:
                 Plotter.new_process(self.detector.histograms[r, c].visualise_get_points_wav_decomp, pulse_width_m)
 
-    def init_kl_test(self):
+    def init_kl_test(self, mm_range, mesh_path):
         self.scene = Scene(1.0, [1.0, 1.0, 1.0])
         self.emitter = vl53l8ch_emitter
         self.detectors = [Detector(f"detector{i}",
@@ -198,31 +198,31 @@ class Simulation:
                                  18,
                                  0.0375
                                  )
-                            for i, _ in enumerate(range(30, 151, 10))
+                            for i, _ in enumerate(mm_range)
                           ]
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/square_W105_D25.stl",
+                        mesh_path,
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.3) @ HTransform().rotation_x(np.pi)
                         )
         )
         self.scene.add_obj(self.emitter)
 
-    def run_kl_test(self):
+    def run_kl_test(self, mm_range, mesh_path, csv_path, N):
         # # # RUN SIMULATION # # #
-        self.init_kl_test()
+        self.init_kl_test(mm_range, mesh_path)
         target = self.scene.get_obj("cavity")
-        for i, mm in enumerate(range(30, 151, 10)):
+        for i, mm in enumerate(mm_range):
             z_offset = mm * 1e-3 # move target rfurther each step
             det = self.detectors[i]
             self.scene.add_obj(det)
             target.transform = HTransform().translation(0, 0, z_offset) @ HTransform().rotation_x(np.pi)
-            RayTracer.run_trimesh(self.scene, target, self.emitter, det, 10_000)
+            RayTracer.run_trimesh(self.scene, target, self.emitter, det, N)
 
         # Collect results into dict
         simresults = {}  # dict: {'100mm': np.ndarray(shape=(8,8,32)), ...}
-        for i, mm in enumerate(range(30, 151, 10)):
+        for i, mm in enumerate(mm_range):
             det = self.detectors[i]
             H = np.stack(
                 [np.stack([det.histograms[r, c].data for c in range(det.zone_cols)], axis=0)
@@ -232,7 +232,7 @@ class Simulation:
             simresults[f"{mm}mm"] = H
 
         # # # IMPORT CSV # # #
-        df = pd.read_csv("res/square_W105_L35_D25.csv")
+        df = pd.read_csv(csv_path)
         results = {}
         for _, csv_row in df.iterrows():
             histograms = np.zeros((8, 8, 18), dtype=float)
@@ -245,11 +245,11 @@ class Simulation:
 
         # # # PLOT SIM VS REAL # # #
         BIN_WIDTH_M = self.detectors[0].bin_width_m
-        R_SEL, C_SEL = 3, 4
+        R_SEL, C_SEL = 2, 3
         fig, axes = plt.subplots(4, 4, figsize=(12, 8))
         axes = axes.flatten()
 
-        for idx, mm in enumerate(range(30, 151, 10)):
+        for idx, mm in enumerate(mm_range):
             dict_name = f"{mm}mm"
 
             # raw counts
@@ -305,7 +305,7 @@ class Simulation:
         kl_results = {}  # dict[str -> (8,8)]
         epsilon = 1e-8
 
-        for mm in range(30, 151, 10):
+        for mm in mm_range:
             key = f"{mm}mm"
             S = simresults[key]  # (8,8,32)
             E = results[key]  # (8,8,32)
@@ -322,7 +322,7 @@ class Simulation:
             kl_results[key] = KL
 
         # Aggregate: mean KL over distances
-        KL_stack = np.stack([kl_results[f"{mm}mm"] for mm in range(30, 151, 10)], axis=0)  # (11,8,8)
+        KL_stack = np.stack([kl_results[f"{mm}mm"] for mm in mm_range], axis=0)  # (11,8,8)
         KL_mean = np.nanmean(KL_stack, axis=0)  # (8,8)
 
         plt.figure(figsize=(6, 5))
@@ -339,7 +339,7 @@ class Simulation:
         sim_depths = []
         exp_depths = []
         true_depth = 25
-        for idx, mm in enumerate(range(30, 151, 10)):
+        for idx, mm in enumerate(mm_range):
             sim_max = exp_max = -1.0 * 10e10
             sim_min = exp_min = 1.0 * 10e10
             for r in range(8):
@@ -367,12 +367,10 @@ class Simulation:
             else:
                 exp_depths.append(-1)
 
-        test_distances = np.arange(30, 151, 10)
-
         # # # PLOT # # #
         plt.figure(figsize=(8, 5))
-        plt.plot(test_distances, exp_depths, 'o-', label='Experimental Depth')
-        plt.plot(test_distances, sim_depths, 's--', label='Simulated Depth')
+        plt.plot(mm_range, exp_depths, 'o-', label='Experimental Depth')
+        plt.plot(mm_range, sim_depths, 's--', label='Simulated Depth')
         plt.axhline(y=true_depth, color='r', linestyle=':', linewidth=2, label='Ground Truth')
 
         plt.title("Depth Comparison: Experimental vs Simulation vs Ground Truth")
@@ -385,7 +383,7 @@ class Simulation:
 
 
 sim = Simulation()
-sim.run_kl_test()
+sim.run_kl_test(mm_range = range(30, 151, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
 
 # sim = Simulation()
 # sim.run()
