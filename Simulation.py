@@ -367,54 +367,83 @@ class Simulation:
 
         ##### DEPTH ######
         # # # PLOT SIM VS REAL # # #
-        sim_depths = []
-        exp_depths = []
-        true_depth = 25
+        # Helper to compute depth (in mm) from a full 8x8xB histogram cube
+        def _depth_from_hist_cube(hist_cube, algo, det, emitter, use_angle_scale=0.75):
+            rows, cols, bins = hist_cube.shape
+            BIN_WIDTH_M = det.bin_width_m
+
+            zs = []  # collected ranges [m] from all valid pixels
+            for r in range(rows):
+                for c in range(cols):
+                    # Build a Histogram object for this pixel
+                    h = Histogram(
+                        time_start=0.0,
+                        time_end=None,
+                        bin_count=bins,
+                        bin_width_m=BIN_WIDTH_M,
+                        data=hist_cube[r, c].astype(float)
+                    )
+
+                    # Per-pixel angles (match your earlier convention and 0.75 scaling)
+                    theta_x = (det.fov_x_rad / det.zone_cols) * (c + 0.5 - (det.zone_cols / 2)) * use_angle_scale
+                    theta_y = (det.fov_y_rad / det.zone_rows) * (r + 0.5 - (det.zone_rows / 2)) * use_angle_scale
+
+                    # Extract detection points for the chosen algorithm
+                    if algo == "echo":
+                        pts = h.get_points_echo_detection(emitter.pulse_length_m, theta_x=theta_x, theta_y=theta_y)
+                    elif algo == "deconv":
+                        pts = h.get_points_deconv(theta_x=theta_x, theta_y=theta_y)
+                    elif algo == "decomp":
+                        pts = h.get_points_wav_decomp(emitter.pulse_length_m, theta_x=theta_x, theta_y=theta_y)
+                    else:
+                        pts = None
+
+                    if pts is not None and len(pts) > 0:
+                        zs.extend([float(p) for p in pts])
+
+            # Use the filtered estimator (requested)
+            return Histogram.compute_depth(zs, filtered=True) if len(zs) > 0 else np.nan
+
+        # Compute depth-vs-distance for each algorithm for both sim and experiment
+        algos = ("echo", "deconv", "decomp")
+        true_depth_mm = 40  # cavity depth
+
+        # Keep per-algorithm series
+        sim_series = {a: [] for a in algos}
+        exp_series = {a: [] for a in algos}
+
         for idx, mm in enumerate(mm_range):
-            sim_max = exp_max = -1.0 * 10e10
-            sim_min = exp_min = 1.0 * 10e10
-            for r in range(8):
-                for c in range(8):
-                    dict_name = f"{mm}mm"
-                    sim_raw = simresults[dict_name][r, c].copy()  # shape (32,)
-                    exp_raw = results[dict_name][r, c].copy()  # shape (32,)
-                    h_exp = Histogram(time_start=0.0, time_end=None, bin_count=18, bin_width_m=BIN_WIDTH_M, data=exp_raw)
-                    h_sim = Histogram(time_start=0.0, time_end=None, bin_count=18, bin_width_m=BIN_WIDTH_M, data=sim_raw)
-                    exp_pts_m = h_exp.get_points_echo_detection(self.emitter.pulse_length_m)
-                    sim_pts_m = h_sim.get_points_echo_detection(self.emitter.pulse_length_m)
-                    if len(sim_pts_m) > 0:
-                        sim_max = max(sim_max, sim_pts_m.max())
-                        sim_min = min(sim_min, sim_pts_m.min())
-                    if len(exp_pts_m) > 0:
-                        exp_max = max(exp_max, exp_pts_m.max())
-                        exp_min = min(exp_min, exp_pts_m.min())
+            key = f"{mm}mm"
+            S = simresults[key]  # shape (8,8,B)
+            E = results[key]  # shape (8,8,B)
+            det = self.detectors[idx]  # detector used at this distance (for FOV, bin width, etc.)
 
-            if sim_max > (-1.0 * 10e10) and sim_min < (1.0 * 10e10):
-                sim_depths.append((sim_max - sim_min) * 1000)
-            else:
-                sim_depths.append(-1)
-            if exp_max > (-1.0 * 10e10) and exp_min < (1.0 * 10e10):
-                exp_depths.append((exp_max - exp_min) * 1000)
-            else:
-                exp_depths.append(-1)
+            for algo in algos:
+                sim_d_mm = _depth_from_hist_cube(S, algo, det, self.emitter)
+                exp_d_mm = _depth_from_hist_cube(E, algo, det, self.emitter)
+                sim_series[algo].append(sim_d_mm*1000)
+                exp_series[algo].append(exp_d_mm*1000)
 
-        # # # PLOT # # #
-        plt.figure(figsize=(8, 5))
-        plt.plot(mm_range, exp_depths, 'o-', label='Experimental Depth')
-        plt.plot(mm_range, sim_depths, 's--', label='Simulated Depth')
-        plt.axhline(y=true_depth, color='r', linestyle=':', linewidth=2, label='Ground Truth')
+        # --- Plot: three subplots, one per algorithm ---
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharex=True, sharey=True)
+        for ax, algo in zip(axes, algos):
+            ax.plot(mm_range, exp_series[algo], 'o-', label='Experimental')
+            ax.plot(mm_range, sim_series[algo], 's--', label='Simulated')
+            ax.axhline(y=true_depth_mm, linestyle=':', linewidth=2, label='Ground Truth' if algo == algos[0] else None)
 
-        plt.title("Depth Comparison: Experimental vs Simulation vs Ground Truth")
-        plt.xlabel("Test Distance (mm)")
-        plt.ylabel("Depth (mm)")
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.legend()
+            ax.set_title(f"Depth vs Distance — {algo}")
+            ax.set_xlabel("Test Distance (mm)")
+            ax.grid(True, linestyle='--', alpha=0.6)
+
+        axes[0].set_ylabel("Depth (mm)")
+        axes[0].legend()
+        fig.suptitle("Computed Depth (filtered) — Experimental vs Simulation")
         plt.tight_layout()
         plt.show()
 
 
 # sim = Simulation()
-# sim.run_kl_test(mm_range = range(30, 121, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
+# sim.run_kl_test(mm_range = range(30, 121, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=10_000)
 
 sim = Simulation()
 sim.run()

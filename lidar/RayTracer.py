@@ -9,7 +9,7 @@ class RayTracer:
         pass
 
     @staticmethod
-    def run_trimesh(scene, target, emitter, detector, N, visualise=False):
+    def run_trimesh(scene, target, emitter, detector, N, visualise=True):
         # construct trimesh scene
         target_mesh = target.to_trimesh_mesh()
         emitter_mesh = emitter.to_trimesh_mesh()

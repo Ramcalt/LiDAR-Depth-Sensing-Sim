@@ -292,48 +292,57 @@ class Histogram:
         if data.size < 3:
             return []
 
-        # setup model and estimate
+        # get maxima
         N = len(data)
-        x_m = np.arange(N) * self.bin_width_m
-        initial_guess = self.get_decomp_estimate_maxima(data)
+        deriv = self.compute_derivative(data)
+        dderiv = self.compute_second_derivative(data)
+        maxima = np.rint(self.find_local_maxima(data, deriv, dderiv)).astype(int)
+        maxima = maxima[(maxima >= 0) & (maxima < N)]
+        if len(maxima) == 0:
+            return []
 
+        # setup model and estimate
+        x_m = np.arange(N) * self.bin_width_m
         sigma = pulse_width_m / 2.355
-        def model(x, A1, mu1, A2, mu2):
-            return (
-                A1 * np.exp(-0.5 * ((x - mu1) / sigma) ** 2) +
-                A2 * np.exp(-0.5 * ((x - mu2) / sigma) ** 2)
-            )
+
+        def model(x, *params):
+            n_peaks = len(params) // 2
+            result = np.zeros_like(x)
+            for i in range(n_peaks):
+                A = params[2 * i]
+                mu = params[2 * i + 1]
+                result += A * np.exp(-0.5 * ((x - mu)/sigma) ** 2)
+            return result
+
+        # estimate amplitudes and positions
+        amps = [data[m] for m in maxima]
+        mus = [x_m[m] for m in maxima]
+        initial_guess = []
+        for A, mu in zip(amps, mus):
+            initial_guess += [A, mu]
+
+        # bounds
+        lower_bounds = []
+        upper_bounds = []
+        for _ in range(len(maxima)):
+            lower_bounds += [0, 0]  # amplitude > 0, mu > 0
+            upper_bounds += [1, np.inf]  # amplitude < 1
 
         # curve fit
-        lower_bounds = [0, 0, 0, 0]
-        upper_bounds = [1, np.inf, 1, np.inf]
         try:
-            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=2000)
+            popt, _ = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=2000)
         except RuntimeError:
             return np.array([])
 
-        # Quick amplitude based filtering
-        correction = np.cos(np.sqrt(theta_x ** 2 + theta_y ** 2))
-
-        A1, mu1, A2, mu2 = popt
+        # SORT
         correction = np.cos(np.sqrt(theta_x ** 2 + theta_y ** 2))
         peaks = []
-
-        # SORT
-        if mu1 > mu2:
-            mu1, mu2 = mu2, mu1
-            A1, A2 = A2, A1
-        # COLLECT PEAKS
-        if A1 > 0.50 and mu1 > 0 and A2 > 0.50 and mu2 > 0: # if we have two strong peaks append both
-            if np.abs(mu2 - mu1) > 0.5: # unreasonable, discard mu2
-                peaks.append(mu1 * correction + offset)
-            else:
-                peaks.append(mu1 * correction + offset)
-                peaks.append(mu2 * correction + offset)
-        elif mu1 > 0 and A1 > 0.25: # otherwise append one
-            peaks.append(mu1 * correction + offset)
-        elif mu2 > 0 and A2 > 0.25:
-            peaks.append(mu2 * correction + offset)
+        n_peaks = len(popt) // 2
+        for i in range(n_peaks):
+            A = popt[2 * i]
+            mu = popt[2 * i + 1]
+            if A > 0.25 and mu > 0:
+                peaks.append(mu * correction + offset)
         return np.array(sorted(peaks))
 
 
