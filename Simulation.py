@@ -12,8 +12,8 @@ import open3d as o3d
 import trimesh
 import numpy as np
 import pandas as pd
-import re
-from pathlib import Path
+from scipy.special import rel_entr
+from scipy.ndimage import zoom
 from scipy.special import rel_entr
 import matplotlib.pyplot as plt
 from lidar.Histogram import Histogram
@@ -302,35 +302,65 @@ class Simulation:
 
         # # # KL TEST # # #
 
-        kl_results = {}  # dict[str -> (8,8)]
-        epsilon = 1e-8
+        kl_results = {}
+        alpha = 1e-6  # Laplace smoothing (pseudocount per bin)
 
         for mm in mm_range:
             key = f"{mm}mm"
-            S = simresults[key]  # (8,8,32)
-            E = results[key]  # (8,8,32)
+            S = np.asarray(simresults[key], dtype=np.float64)
+            E = np.asarray(results[key], dtype=np.float64)
 
-            # normalise with epsilon
-            S = S + epsilon
-            S /= S.sum(axis=2, keepdims=True)
+            # Sanitize any NaN/Inf in inputs to zeros (raw counts should be >= 0)
+            S = np.nan_to_num(S, nan=0.0, posinf=0.0, neginf=0.0)
+            E = np.nan_to_num(E, nan=0.0, posinf=0.0, neginf=0.0)
 
-            E = E + epsilon
-            E /= E.sum(axis=2, keepdims=True)
+            # Per-histogram totals
+            S_sum = S.sum(axis=2, keepdims=True)
+            E_sum = E.sum(axis=2, keepdims=True)
 
-            # KL(exp || sim) per pixel
-            KL = np.sum(rel_entr(E, S), axis=2)  # (8,8)
+            # Zones with nonzero totals on both sides
+            valid_mask = ((S_sum > 0.0) & (E_sum > 0.0)).squeeze(-1)
+
+            # Laplace smoothing BEFORE normalisation to prevent zero probabilities
+            # (add alpha pseudocount to each bin)
+            Sn = (S + alpha) / (S_sum + alpha * S.shape[2])
+            En = (E + alpha) / (E_sum + alpha * E.shape[2])
+
+            # KL(exp || sim)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                KL = np.sum(rel_entr(En, Sn), axis=2)
+
+            # Invalidate zones where totals were zero on either side
+            KL[~valid_mask] = np.nan
+
+            # Also treat non-finite as NaN (we will ignore them in the mean)
+            KL[~np.isfinite(KL)] = np.nan
+
             kl_results[key] = KL
 
-        # Aggregate: mean KL over distances
-        KL_stack = np.stack([kl_results[f"{mm}mm"] for mm in mm_range], axis=0)  # (11,8,8)
-        KL_mean = np.nanmean(KL_stack, axis=0)  # (8,8)
+        # Diagnostic: count finite values (excludes NaN and +/- Inf)
+        for mm in mm_range:
+            key = f"{mm}mm"
+            finite_count = int(np.sum(np.isfinite(kl_results[key])))
+            print(f"{key}: finite KL = {finite_count}")
 
+        # Aggregate across distances: ignore NaN/Inf
+        KL_stack = np.stack([kl_results[f"{mm}mm"] for mm in mm_range], axis=0)
+        KL_mean = np.nanmean(KL_stack, axis=0)
+
+        # Plot (robust to NaNs)
+        M = np.ma.masked_invalid(KL_mean)
         plt.figure(figsize=(6, 5))
-        plt.imshow(KL_mean, cmap='viridis', aspect='equal', interpolation='nearest')
-        plt.colorbar(label="Mean KL (exp || sim)")
-        plt.xticks(range(8), [f"C{c}" for c in range(8)])
-        plt.yticks(range(8), [f"R{r}" for r in range(8)])
-        plt.title("Mean KL Divergence per Pixel (30–150 mm)")
+        if np.all(M.mask):
+            plt.text(0.5, 0.5, "KL heatmap is all invalid (check inputs / CSV stride).",
+                     ha='center', va='center')
+        else:
+            vmax = np.nanpercentile(KL_mean, 99)  # robust upper bound
+            plt.imshow(M, cmap='viridis', aspect='equal', interpolation='nearest', vmin=0.0, vmax=vmax)
+            plt.colorbar(label="Mean KL (exp || sim)")
+            plt.xticks(range(8), [f"C{c}" for c in range(8)])
+            plt.yticks(range(8), [f"R{r}" for r in range(8)])
+            plt.title("Mean KL Divergence per Pixel (30–150 mm)")
         plt.tight_layout()
         plt.show()
 
@@ -383,7 +413,7 @@ class Simulation:
 
 
 sim = Simulation()
-sim.run_kl_test(mm_range = range(30, 151, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
+sim.run_kl_test(mm_range = range(30, 121, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
 
 # sim = Simulation()
 # sim.run()
