@@ -157,8 +157,8 @@ class Histogram:
         points = []
         pulse_width_bins = pulse_width_m / self.bin_width_m
         for i in range(len(maxima)):
-            if fwhm[i] > pulse_width_bins/4:
-                if fwhm[i] < pulse_width_bins*1.5:
+            if fwhm[i] > pulse_width_bins/2:
+                if fwhm[i] < pulse_width_bins:
                     points.append(single_points[i])
                 else:
                     mid = (fwhm_right[i] + fwhm_left[i]) / 2.0
@@ -168,7 +168,7 @@ class Histogram:
                     points.append(maxima[i] + (fwhm_right[i] - p_right))
         return np.array(points)
 
-    def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=0):
+    def get_points_echo_detection(self, pulse_width_m, theta_x=0, theta_y =0, offset=-0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)
@@ -180,8 +180,8 @@ class Histogram:
         maxima = self.find_local_maxima(data, deriv, dderiv)
         fwhm, p_left, p_right, single_points = self.find_fwhm(data, maxima)
         points = self.compute_points(pulse_width_m, maxima, fwhm, p_left, p_right, single_points)
-        # correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
-        correction = 1
+        correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        #correction = 1
         return points * self.bin_width_m * correction + offset
 
     # - - - - - - - - - - DEPTH - - - - - - - - - - #
@@ -221,7 +221,7 @@ class Histogram:
 
         return deconv
 
-    def get_points_deconv(self, theta_x=0, theta_y =0, offset=0):
+    def get_points_deconv(self, theta_x=0, theta_y =0, offset=-0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)
@@ -231,14 +231,15 @@ class Histogram:
         # kernel = np.array([0.005,0.016,0.066,0.211,0.519,0.882,1.000,0.873,0.556,0.243,0.079,0.018,0.003])
         # KERNEL IS HISTOGRAM [3, 7] FROM SIM.RUN_FIND_KERNEL
         # [0.009,0.018,0.037,0.078,0.136,0.237,0.395,0.557,0.733,0.908,0.985,1.000,0.949,0.821,0.655,0.451,0.318,0.170,0.093,0.057,0.034,0.008,0.005,0.001,0.001,0.000,0.000,0.000,0.000,0.000,0.000,0.000]
-        kernel = np.array([0.009,0.018,0.037,0.078,0.136,0.237,0.395,0.557,0.733,0.908,0.985,1.000,0.949,0.821,0.655,0.451,0.318,0.170,0.093,0.057,0.034,0.008,0.005])
+        # [0 7] [0.006,0.011,0.040,0.062,0.112,0.303,0.679,0.863,0.931,0.977,1.000,0.906,0.682,0.482,0.353,0.194,0.112,0.062,0.040,0.011,0.006]
+        kernel = np.array([0.006,0.011,0.040,0.062,0.112,0.303,0.679,0.863,0.931,0.977,1.000,0.906,0.682,0.482,0.353,0.194,0.112,0.062,0.040,0.011,0.006])
         deconv = self.wiener_deconv(data, kernel/np.sum(kernel))
         deconv /= np.max(deconv)
         deriv = self.compute_derivative(deconv)
         dderiv = self.compute_second_derivative(deconv)
         maxima = self.find_local_maxima(deconv, deriv, dderiv)
-        # correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
-        correction = 1
+        correction = np.cos(np.sqrt(theta_x**2 + theta_y**2))
+        #correction = 1
         return maxima * self.bin_width_m * correction + offset
 
     # - - - - - - - - - - WAVFORM DECOMPOSITION - - - - - - - - - - #
@@ -248,7 +249,7 @@ class Histogram:
         maxima = self.find_local_maxima(data, deriv, dderiv, min_amp=0.1)
         if len(maxima) <= 0:
             idx = int(np.argmax(data))
-            A1 = np.float(data[idx])
+            A1 = float(data[idx])
             mu1 = idx * self.bin_width_m
             initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
         elif len(maxima) == 1:
@@ -284,7 +285,7 @@ class Histogram:
             initial_guess = [0.5, estimated_points[0], 0.5, estimated_points[1]]
         return initial_guess
 
-    def get_points_wav_decomp(self, pulse_width_m):
+    def get_points_wav_decomp(self, pulse_width_m, theta_x=0, theta_y=0, offset=-0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)
@@ -304,19 +305,35 @@ class Histogram:
             )
 
         # curve fit
+        lower_bounds = [0, 0, 0, 0]
+        upper_bounds = [1, np.inf, 1, np.inf]
         try:
-            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, maxfev=5000)
+            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=2000)
         except RuntimeError:
             return np.array([])
 
         # Quick amplitude based filtering
-        A1, mu1, A2, mu2 = popt
-        peaks = []
-        if A1 > 0.25 and mu1 > 0:
-            peaks.append(mu1)
-        if A2 > 0.25 and mu2 > 0:
-            peaks.append(mu2)
+        correction = np.cos(np.sqrt(theta_x ** 2 + theta_y ** 2))
 
+        A1, mu1, A2, mu2 = popt
+        correction = np.cos(np.sqrt(theta_x ** 2 + theta_y ** 2))
+        peaks = []
+
+        # SORT
+        if mu1 > mu2:
+            mu1, mu2 = mu2, mu1
+            A1, A2 = A2, A1
+        # COLLECT PEAKS
+        if A1 > 0.50 and mu1 > 0 and A2 > 0.50 and mu2 > 0: # if we have two strong peaks append both
+            if np.abs(mu2 - mu1) > 0.5: # unreasonable, discard mu2
+                peaks.append(mu1 * correction + offset)
+            else:
+                peaks.append(mu1 * correction + offset)
+                peaks.append(mu2 * correction + offset)
+        elif mu1 > 0 and A1 > 0.25: # otherwise append one
+            peaks.append(mu1 * correction + offset)
+        elif mu2 > 0 and A2 > 0.25:
+            peaks.append(mu2 * correction + offset)
         return np.array(sorted(peaks))
 
 
@@ -329,11 +346,13 @@ class Histogram:
         if data.size < 3:
             return []
 
-        # setup model
-        N = data.size
+        # setup model and estimate
+        N = len(data)
         x_m = np.arange(N) * self.bin_width_m
-        sigma = pulse_width_m / 2.355
         initial_guess = self.get_decomp_estimate_maxima(data)
+
+        sigma = pulse_width_m / 2.355
+
         def model(x, A1, mu1, A2, mu2):
             return (
                     A1 * np.exp(-0.5 * ((x - mu1) / sigma) ** 2) +
@@ -341,8 +360,10 @@ class Histogram:
             )
 
         # curve fit
+        lower_bounds = [0, 0, 0, 0]
+        upper_bounds = [1, np.inf, 1, np.inf]
         try:
-            popt, _ = curve_fit(model, x_m, data, p0=initial_guess, maxfev=5000)
+            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=2000)
         except RuntimeError:
             print("Curve fitting failed — plotting raw histogram only.")
             plt.figure(figsize=(10, 4))
@@ -385,7 +406,7 @@ class Histogram:
             data /= np.max(data)
         if data.size < 3:
             return []
-        kernel = np.array([0.005,0.016,0.066,0.211,0.519,0.882,1.000,0.873,0.556,0.243,0.079,0.018,0.003])
+        kernel = np.array([0.006,0.011,0.040,0.062,0.112,0.303,0.679,0.863,0.931,0.977,1.000,0.906,0.682,0.482,0.353,0.194,0.112,0.062,0.040,0.011,0.006])
         deconv = self.wiener_deconv(data, kernel/np.sum(kernel))
         deconv /= np.max(deconv)
         deriv = self.compute_derivative(deconv)

@@ -71,30 +71,14 @@ class Plotter:
         plt.show()
 
     @staticmethod
-    def plot_points(algo, hists, rows, cols, pulse_width_m, detector):
+    def plot_points(points, algo, rows, cols):
         # use browser renderer to avoid terminal output
         pio.renderers.default = "browser"
 
-        xs, ys, zs = [], [], []
-        for yy in range(rows):
-            for xx in range(cols):
-                theta_x = (detector.fov_x_rad / detector.zone_cols) * (
-                            xx + 0.5 - (detector.zone_cols / 2))
-                theta_y = (detector.fov_y_rad / detector.zone_rows) * (
-                            yy + 0.5 - (detector.zone_rows / 2))
-                if algo == "echo":
-                    pts = hists[yy][xx].get_points_echo_detection(pulse_width_m, theta_x, theta_y)
-                elif algo == "deconv":
-                    pts = hists[yy][xx].get_points_deconv(theta_x, theta_y)
-                else:
-                    pts = hists[yy][xx].get_points_wav_decomp(pulse_width_m)
-
-                if pts is None or len(pts) == 0:
-                    continue
-                for p in pts:
-                    xs.append(xx)
-                    ys.append(yy)
-                    zs.append(p)
+        xs, ys, zs = points
+        xs = list(xs)
+        ys = list(ys)
+        zs = list(zs)
 
         fig = go.Figure(
             data=[go.Scatter3d(
@@ -109,7 +93,7 @@ class Plotter:
                 yaxis_title='Y (rows)',
                 zaxis_title='Range (m)',
             ),
-            title="Echo Detections (3D)",
+            title=f"Point Detections (algo = {algo})",
             template="plotly_white",
             height=700
         )

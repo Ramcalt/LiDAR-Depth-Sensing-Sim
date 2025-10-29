@@ -37,7 +37,7 @@ vl53l8ch_detector = Detector("detector",
                          8,
                          0.79,
                          0.79,
-                         32,
+                         18,
                          0.0375
                          )
 
@@ -63,7 +63,7 @@ class Simulation:
             SceneObject("cavity",
                         "res/flat_W105000.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
-                        HTransform().translation(0,0, +0.4) @ HTransform().rotation_x(np.pi)
+                        HTransform().translation(0,0, +0.15) @ HTransform().rotation_x(np.pi)
                         )
         )
         self.scene.add_obj(self.detector)
@@ -83,14 +83,14 @@ class Simulation:
         self.detector = vl53l8ch_detector
         self.scene.add_obj(
             SceneObject("cavity",
-                        "res/cavity_H24_D30.stl",
+                        "res/square_W105_L40_D40.stl",
                         Material(1.0, 1.0, 1.0, [0.9, 0.2, 0.1]),
                         HTransform().translation(0,0, +0.1) @ HTransform().rotation_x(np.pi)
                         )
         )
         self.scene.add_obj(self.detector)
         self.scene.add_obj(self.emitter)
-        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 500_000)
+        RayTracer.run_trimesh(self.scene, self.scene.get_obj("cavity"), self.emitter, self.detector, 250_000)
         self.view_histograms()
         self.view_plots(algo="echo")
         self.view_plots(algo="deconv")
@@ -115,27 +115,28 @@ class Simulation:
     def view_plots(self, algo="echo"):
         """Runs matplotlib plots in separate processes"""
         # COMPUTE DEPTH
-        points = []
+        xs, ys, zs = [], [], []  # zone-x, zone-y, range[m]
         for r in range(self.detector.zone_rows):
             for c in range(self.detector.zone_cols):
                 theta_x = (self.detector.fov_x_rad / self.detector.zone_cols) * (
-                            c + 0.5 - (self.detector.zone_cols / 2))
+                            c + 0.5 - (self.detector.zone_cols / 2)) * 0.75
                 theta_y = (self.detector.fov_y_rad / self.detector.zone_rows) * (
-                            r + 0.5 - (self.detector.zone_rows / 2))
+                            r + 0.5 - (self.detector.zone_rows / 2)) * 0.75
                 if algo == "echo":
                     pts = self.detector.histograms[r, c].get_points_echo_detection(self.emitter.pulse_length_m, theta_x = theta_x, theta_y = theta_y)
                 elif algo == "deconv":
                     pts = self.detector.histograms[r, c].get_points_deconv(theta_x=theta_x, theta_y=theta_y)
                 else:
-                    pts = self.detector.histograms[r, c].get_points_wav_decomp(self.emitter.pulse_length_m)
+                    pts = self.detector.histograms[r, c].get_points_wav_decomp(self.emitter.pulse_length_m, theta_x=theta_x, theta_y=theta_y, )
                 if pts is not None and len(pts) > 0:
-                    points.extend(pts)
-        points = np.array(points, dtype=float)
-        points = points[points > 0]
-        print(f"depth = {Histogram.compute_depth(points, filtered=False)}")
-        print(f"depth filtered = {Histogram.compute_depth(points, filtered=True)}")
+                    for p in pts:
+                        xs.append(c)
+                        ys.append(r)
+                        zs.append(float(p))
+        print(f"depth = {Histogram.compute_depth(zs, filtered=False)}")
+        print(f"depth filtered = {Histogram.compute_depth(zs, filtered=True)}")
         # SHOW POINTS
-        Plotter.plot_points(algo, self.detector.histograms, self.detector.zone_rows, self.detector.zone_cols, self.emitter.pulse_length_m, self.detector)
+        Plotter.plot_points((xs, ys, zs), algo, self.detector.zone_rows, self.detector.zone_cols)
         # SHOW HISTOGRAM PROCESSING
         self.select_and_visualize(algo)
 
@@ -412,15 +413,15 @@ class Simulation:
         plt.show()
 
 
+# sim = Simulation()
+# sim.run_kl_test(mm_range = range(30, 121, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
+
 sim = Simulation()
-sim.run_kl_test(mm_range = range(30, 121, 10), mesh_path = "res/square_W105_L40_D40.stl", csv_path = "res/square_W105_L40_D40.csv", N=250_000)
+sim.run()
+sim.view_scene_trimesh()
 
-# sim = Simulation()
-# sim.run()
-# sim.view_scene_trimesh()
-
-# sim = Simulation()
-# sim.run_find_kerenel()
-# sim.view_scene_trimesh()
+#sim = Simulation()
+#sim.run_find_kerenel()
+#sim.view_scene_trimesh()
 
 
