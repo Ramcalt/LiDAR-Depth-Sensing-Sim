@@ -243,48 +243,6 @@ class Histogram:
         return maxima * self.bin_width_m * correction + offset
 
     # - - - - - - - - - - WAVFORM DECOMPOSITION - - - - - - - - - - #
-    def get_decomp_estimate_maxima(self, data):
-        deriv = self.compute_derivative(data)
-        dderiv = self.compute_second_derivative(data)
-        maxima = self.find_local_maxima(data, deriv, dderiv, min_amp=0.1)
-        if len(maxima) <= 0:
-            idx = int(np.argmax(data))
-            A1 = float(data[idx])
-            mu1 = idx * self.bin_width_m
-            initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
-        elif len(maxima) == 1:
-            max1_left = np.floor(maxima[0])
-            max1_right = np.ceil(maxima[0])
-            A1 = self.lerp(data[int(max1_left)], data[int(max1_right)], maxima[0] - max1_left)
-            mu1 = maxima[0] * self.bin_width_m
-            initial_guess = [A1, mu1, 0, 0]
-        else:
-            amps = [np.interp(m, np.arange(len(data)), data) for m in maxima]
-            maxima = list(zip(maxima, amps))
-            maxima_sorted = sorted(maxima, key=lambda m: m[1], reverse=True)
-            max1_left = np.floor(maxima_sorted[0][0])
-            max1_right = np.ceil(maxima_sorted[0][0])
-            max2_left = np.floor(maxima_sorted[1][0])
-            max2_right = np.ceil(maxima_sorted[1][0])
-            A1 = self.lerp(data[int(max1_left)], data[int(max1_right)], maxima_sorted[0][0] - max1_left)
-            A2 = self.lerp(data[int(max2_left)], data[int(max2_right)], maxima_sorted[1][0] - max2_left)
-            mu1 = maxima_sorted[0][0] * self.bin_width_m
-            mu2 = maxima_sorted[1][0] * self.bin_width_m
-            initial_guess = [A1, mu1, A2, mu2]
-        return initial_guess
-
-    def get_decomp_estimate_deconv(self, data):
-        estimated_points = self.get_points_deconv()
-        if len(estimated_points) <= 0:
-            A1 = np.argmax(data)
-            mu1 = np.argmax(data) * self.bin_width_m + self.time_start
-            initial_guess =  [A1, mu1, 0.1 * A1, mu1 + self.bin_width_m * 5]
-        elif len(estimated_points) == 1:
-            initial_guess = [1, estimated_points[0], 0, 0]
-        else:
-            initial_guess = [0.5, estimated_points[0], 0.5, estimated_points[1]]
-        return initial_guess
-
     def get_points_wav_decomp(self, pulse_width_m, theta_x=0, theta_y=0, offset=-0.0375):
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
@@ -347,36 +305,68 @@ class Histogram:
 
 
     # ========================== VISUALISATION ======================= #
-    def visualise_get_points_wav_decomp(self, pulse_width_m):
-        """Visualise the result of the waveform decomposition method."""
+    def visualise_get_points_wav_decomp(self, pulse_width_m, theta_x=0, theta_y=0, offset=-0.0375):
+        """Visualise the waveform decomposition with as many Gaussian components as fitted."""
+        # Copy data
         data = np.asarray(self.data, dtype=float).copy()
         if np.max(data) > 0:
             data /= np.max(data)
         if data.size < 3:
-            return []
+            return
 
-        # setup model and estimate
+        # Prepare domain
         N = len(data)
         x_m = np.arange(N) * self.bin_width_m
-        initial_guess = self.get_decomp_estimate_maxima(data)
-
         sigma = pulse_width_m / 2.355
 
-        def model(x, A1, mu1, A2, mu2):
-            return (
-                    A1 * np.exp(-0.5 * ((x - mu1) / sigma) ** 2) +
-                    A2 * np.exp(-0.5 * ((x - mu2) / sigma) ** 2)
-            )
-
-        # curve fit
-        lower_bounds = [0, 0, 0, 0]
-        upper_bounds = [1, np.inf, 1, np.inf]
-        try:
-            popt, pcov = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=2000)
-        except RuntimeError:
-            print("Curve fitting failed — plotting raw histogram only.")
+        # Run decomposition to get fitted peaks
+        data_copy = np.asarray(self.data, dtype=float).copy()
+        peaks = self.get_points_wav_decomp(pulse_width_m, theta_x, theta_y, offset)
+        if peaks is None or len(peaks) == 0:
+            print("No peaks found — plotting raw waveform.")
             plt.figure(figsize=(10, 4))
-            plt.plot(x_m, data, label="Histogram (normalised)")
+            plt.plot(x_m, data, 'k-', label="Waveform (normalised)")
+            plt.xlabel("Range (m)")
+            plt.ylabel("Amplitude")
+            plt.title("Waveform — No Peaks Detected")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.show()
+            return
+
+        # Estimate number of peaks
+        n_peaks = len(peaks)
+
+        # Reconstruct the full model
+        def model(x, *params):
+            n = len(params) // 2
+            result = np.zeros_like(x)
+            for i in range(n):
+                A = params[2 * i]
+                mu = params[2 * i + 1]
+                result += A * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+            return result
+
+        # Recreate amplitude and mean guesses for fitting (reuse logic from get_points_wav_decomp)
+        deriv = self.compute_derivative(data)
+        dderiv = self.compute_second_derivative(data)
+        maxima = np.rint(self.find_local_maxima(data, deriv, dderiv)).astype(int)
+        maxima = maxima[(maxima >= 0) & (maxima < N)]
+        amps = [data[m] for m in maxima]
+        mus = [x_m[m] for m in maxima]
+        initial_guess = []
+        for A, mu in zip(amps, mus):
+            initial_guess += [A, mu]
+
+        lower_bounds = [0, 0] * len(maxima)
+        upper_bounds = [1, np.inf] * len(maxima)
+
+        try:
+            popt, _ = curve_fit(model, x_m, data, p0=initial_guess, bounds=(lower_bounds, upper_bounds), maxfev=5000)
+        except RuntimeError:
+            print("Curve fitting failed — plotting raw waveform only.")
+            plt.figure(figsize=(10, 4))
+            plt.plot(x_m, data, 'k-', label="Waveform (normalised)")
             plt.xlabel("Range (m)")
             plt.ylabel("Amplitude")
             plt.title("Waveform Decomposition (fit failed)")
@@ -385,24 +375,24 @@ class Histogram:
             plt.show()
             return
 
-        A1, mu1, A2, mu2 = popt
+        # Compose full fit
         fit = model(x_m, *popt)
-        comp1 = A1 * np.exp(-0.5 * ((x_m - mu1) / sigma) ** 2)
-        comp2 = A2 * np.exp(-0.5 * ((x_m - mu2) / sigma) ** 2)
 
-        # Plot
+        # Plot each Gaussian component
         fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-        ax.plot(x_m, data, 'k-', label="Measured waveform")
-        ax.plot(x_m, fit, 'r-', label="Fitted sum (2-Gaussian)")
-        ax.plot(x_m, comp1, 'b--', label=f"Component 1 (μ={mu1:.3f} m)")
-        ax.plot(x_m, comp2, 'g--', label=f"Component 2 (μ={mu2:.3f} m)")
+        ax.plot(x_m, data, 'k-', lw=1.5, label="Measured waveform")
+        ax.plot(x_m, fit, 'r-', lw=1.5, label=f"Fitted sum ({n_peaks}-Gaussian)")
 
-        # Mark peak centers
-        ax.axvline(mu1, color='b', linestyle=':', alpha=0.6)
-        ax.axvline(mu2, color='g', linestyle=':', alpha=0.6)
+        for i in range(n_peaks):
+            A = popt[2 * i]
+            mu = popt[2 * i + 1]
+            comp = A * np.exp(-0.5 * ((x_m - mu) / sigma) ** 2)
+            ax.plot(x_m, comp, '--', label=f"Component {i + 1} (μ={mu:.3f} m)")
+            ax.axvline(mu, color='gray', linestyle=':', alpha=0.6)
+
         ax.set_xlabel("Range (m)")
         ax.set_ylabel("Amplitude (norm.)")
-        ax.set_title("Waveform Decomposition — Two Fixed-Width Gaussians")
+        ax.set_title(f"Waveform Decomposition — {n_peaks} Gaussian Component(s)")
         ax.legend()
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
